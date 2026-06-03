@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}{{ territory.territory_name }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3 px-4">
+
+  <!-- Breadcrumb -->
+  <nav aria-label="breadcrumb" class="mb-2">
+    <ol class="breadcrumb mb-0">
+      <li class="breadcrumb-item">
+        <a href="/?election_code={{ election_code }}&organ_code={{ organ_code }}">Map</a>
+      </li>
+      {% if territory.parent_name %}
+      <li class="breadcrumb-item text-muted">{{ territory.parent_name }}</li>
+      {% endif %}
+      <li class="breadcrumb-item active fw-semibold">{{ territory.territory_name }}</li>
+    </ol>
+  </nav>
+
+  <!-- Header row -->
+  <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+    <h4 class="mb-0">{{ territory.territory_name }}</h4>
+    <span class="badge bg-secondary">{{ organ_code }}</span>
+
+    <form method="get" action="/results" class="d-flex gap-2 ms-auto">
+      <input type="hidden" name="territory_code" value="{{ territory.territory_code }}">
+      <select name="election_code" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+        {% for e in elections %}
+        <option value="{{ e.election_code }}" {% if e.election_code == election_code %}selected{% endif %}>
+          {{ e.election_name }}
+        </option>
+        {% endfor %}
+      </select>
+      <select name="organ_code" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+        <option value="CM" {% if organ_code == "CM" %}selected{% endif %}>Câmara Municipal</option>
+        <option value="AM" {% if organ_code == "AM" %}selected{% endif %}>Assembleia Municipal</option>
+        <option value="AF" {% if organ_code == "AF" %}selected{% endif %}>Assembleia de Freguesia</option>
+      </select>
+    </form>
+  </div>
+
+  <!-- Turnout summary cards -->
+  {% if turnout %}
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+      <div class="card text-center p-3">
+        <div class="stat-value">{{ "{:,}".format(turnout.registered_voters) }}</div>
+        <div class="text-muted small">Registered Voters</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card text-center p-3">
+        <div class="stat-value text-primary">{{ turnout.turnout_rate }}%</div>
+        <div class="text-muted small">Turnout</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card text-center p-3">
+        <div class="stat-value">{{ "{:,}".format(turnout.valid_votes) }}</div>
+        <div class="text-muted small">Valid Votes</div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card text-center p-3">
+        <div class="stat-value text-warning">{{ "{:,}".format(turnout.blank_votes + turnout.null_votes) }}</div>
+        <div class="text-muted small">Blank + Null</div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Results table + charts -->
+  <div class="row g-3 mb-4">
+
+    <!-- Results table -->
+    <div class="col-xl-5">
+      <div class="card h-100">
+        <div class="card-header bg-white fw-semibold">Results</div>
+        <div class="card-body p-0">
+          {% if rows %}
+          <table class="table table-sm table-hover mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>Party / List</th>
+                <th class="text-end">Votes</th>
+                <th class="text-end">%</th>
+                <th class="text-end">Seats</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in rows %}
+              <tr>
+                <td>
+                  <span class="fw-semibold">{{ r.sigla }}</span>
+                  {% if r.name %}<br><small class="text-muted">{{ r.name }}</small>{% endif %}
+                </td>
+                <td class="text-end">{{ "{:,}".format(r.votes) }}</td>
+                <td class="text-end">{{ r.vote_share if r.vote_share else "—" }}%</td>
+                <td class="text-end">
+                  {% if r.mandates %}
+                    <span class="badge bg-primary rounded-pill">{{ r.mandates }}</span>
+                  {% else %}—{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% else %}
+          <p class="text-muted p-3 mb-0">No results found for this territory and governing body.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="col-xl-7">
+      <div class="row g-3">
+        {% if vote_chart_html %}
+        <div class="col-12">
+          <div class="card">
+            <div class="card-body p-2">{{ vote_chart_html | safe }}</div>
+          </div>
+        </div>
+        {% endif %}
+        {% if seat_chart_html %}
+        <div class="col-12">
+          <div class="card">
+            <div class="card-body p-2">{{ seat_chart_html | safe }}</div>
+          </div>
+        </div>
+        {% endif %}
+        {% if not vote_chart_html and not seat_chart_html %}
+        <div class="col-12">
+          <div class="card"><div class="card-body text-muted">No chart data available.</div></div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Elected members -->
+  {% if elected_by_party %}
+  <div class="card mb-4">
+    <div class="card-header bg-white fw-semibold">Elected Members</div>
+    <div class="card-body">
+      <div class="row g-3">
+        {% for sigla, members in elected_by_party.items() %}
+        <div class="col-md-4 col-lg-3">
+          <div class="fw-semibold text-primary small mb-1">{{ sigla }}</div>
+          <ol class="mb-0 ps-3 small text-secondary">
+            {% for m in members %}
+            <li>{{ m.member_name | title }}</li>
+            {% endfor %}
+          </ol>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

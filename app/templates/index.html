@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Map{% endblock %}
+
+{% block content %}
+<div class="container-fluid p-0" style="height: calc(100vh - 52px); display: flex;">
+
+  <!-- Sidebar -->
+  <div class="bg-white border-end p-3 d-flex flex-column" style="width:300px; overflow-y:auto; flex-shrink:0;">
+    <h6 class="text-uppercase text-secondary fw-bold mb-3" style="font-size:.75rem; letter-spacing:1px;">Filters</h6>
+
+    <form method="get" action="/">
+      <div class="mb-3">
+        <label class="form-label small fw-semibold">Election</label>
+        <select name="election_code" class="form-select form-select-sm" onchange="this.form.submit()">
+          {% for e in elections %}
+          <option value="{{ e.election_code }}" {% if e.election_code == election_code %}selected{% endif %}>
+            {{ e.election_name }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label small fw-semibold">Governing Body</label>
+        <select name="organ_code" class="form-select form-select-sm" onchange="this.form.submit()">
+          <option value="CM" {% if organ_code == "CM" %}selected{% endif %}>Câmara Municipal</option>
+          <option value="AM" {% if organ_code == "AM" %}selected{% endif %}>Assembleia Municipal</option>
+        </select>
+      </div>
+    </form>
+
+    <hr class="my-2">
+
+    <h6 class="text-uppercase text-secondary fw-bold mb-2" style="font-size:.75rem; letter-spacing:1px;">National Results</h6>
+    {% if national_chart_html %}
+      {{ national_chart_html | safe }}
+    {% else %}
+      <p class="text-muted small">No data available. Run the ETL pipeline first.</p>
+    {% endif %}
+  </div>
+
+  <!-- Map area -->
+  <div class="flex-grow-1 p-2 d-flex flex-column">
+    <div id="map" class="flex-grow-1"></div>
+    <p class="text-muted small mt-1 mb-0 ps-1">
+      Click a municipality to view detailed results. Colours indicate the winning party/list.
+    </p>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const ELECTION_CODE = {{ election_code | tojson }};
+const ORGAN_CODE    = {{ organ_code | tojson }};
+
+const PARTY_COLORS = {
+  "PS":       "#f97316",
+  "PPD/PSD":  "#fb923c",
+  "CDU":      "#dc2626",
+  "PCP-PEV":  "#dc2626",
+  "BE":       "#7f1d1d",
+  "CDS-PP":   "#1d4ed8",
+  "IL":       "#06b6d4",
+  "CH":       "#1e1b4b",
+  "PAN":      "#16a34a",
+  "JPP":      "#ca8a04",
+  "L":        "#7c3aed",
+  "MPT":      "#78716c",
+  "R.I.R.":   "#b45309",
+};
+const FALLBACK = ["#6366f1","#ec4899","#8b5cf6","#14b8a6","#f59e0b","#10b981","#f43f5e","#0ea5e9"];
+
+function partyColor(sigla) {
+  if (!sigla) return "#d1d5db";
+  for (const [key, col] of Object.entries(PARTY_COLORS)) {
+    if (sigla.startsWith(key)) return col;
+  }
+  let h = 0;
+  for (const c of sigla) h = (h * 31 + c.charCodeAt(0)) & 0x7fffffff;
+  return FALLBACK[h % FALLBACK.length];
+}
+
+const map = L.map("map", { preferCanvas: true }).setView([39.5, -8.0], 6);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  attribution: "© <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a>",
+  maxZoom: 18,
+}).addTo(map);
+
+let geojsonLayer = null;
+let noDataMsg = null;
+
+function loadMap() {
+  const url = `/api/map.geojson?election_code=${ELECTION_CODE}&organ_code=${ORGAN_CODE}`;
+  fetch(url)
+    .then(r => r.json())
+    .then(data => {
+      if (geojsonLayer) map.removeLayer(geojsonLayer);
+      if (noDataMsg) { noDataMsg.remove(); noDataMsg = null; }
+
+      if (!data.features || !data.features.length) {
+        noDataMsg = L.control({ position: "topright" });
+        noDataMsg.onAdd = () => {
+          const d = L.DomUtil.create("div", "alert alert-warning m-2 p-2 small");
+          d.innerHTML = "No geometry loaded. Run <code>etl/load_caop.py</code> to load boundaries.";
+          return d;
+        };
+        noDataMsg.addTo(map);
+        return;
+      }
+
+      geojsonLayer = L.geoJSON(data, {
+        style(feat) {
+          return {
+            fillColor:   partyColor(feat.properties.winner_sigla),
+            fillOpacity: 0.72,
+            color:       "#ffffff",
+            weight:      0.6,
+          };
+        },
+        onEachFeature(feat, layer) {
+          const p = feat.properties;
+          const turnout = p.turnout_rate != null ? p.turnout_rate.toFixed(1) + "%" : "N/A";
+          layer.bindTooltip(
+            `<strong>${p.territory_name}</strong><br>
+             ${p.district_name ? "District: " + p.district_name + "<br>" : ""}
+             Winner: <b>${p.winner_sigla || "—"}</b><br>
+             Vote share: ${p.vote_share != null ? p.vote_share.toFixed(1) + "%" : "N/A"}<br>
+             Turnout: ${turnout}`,
+            { sticky: true }
+          );
+          layer.on("click", () => {
+            window.location = `/results?election_code=${ELECTION_CODE}&territory_code=${p.territory_code}&organ_code=${ORGAN_CODE}`;
+          });
+          layer.on("mouseover", function() { this.setStyle({ weight: 2, color: "#333" }); });
+          layer.on("mouseout",  function() { geojsonLayer.resetStyle(this); });
+        },
+      }).addTo(map);
+
+      map.fitBounds(geojsonLayer.getBounds(), { padding: [10, 10] });
+    })
+    .catch(() => console.warn("Could not load map GeoJSON."));
+}
+
+loadMap();
+</script>
+{% endblock %}
