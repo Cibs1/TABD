@@ -148,15 +148,22 @@ BEGIN
         municipality_code
     )
     SELECT DISTINCT
-        territory_code,
+        CASE
+            WHEN substring(territory_code from 1 for 2) IN ('31', '32') THEN '300000'
+            WHEN substring(territory_code from 1 for 2) BETWEEN '41' AND '49' THEN '400000'
+            ELSE substring(territory_code from 1 for 2) || '0000'
+        END,
         initcap(municipality_name),
         'district',
         NULL,
-        territory_code,
+        CASE
+            WHEN substring(territory_code from 1 for 2) IN ('31', '32') THEN '300000'
+            WHEN substring(territory_code from 1 for 2) BETWEEN '41' AND '49' THEN '400000'
+            ELSE substring(territory_code from 1 for 2) || '0000'
+        END,
         NULL
     FROM staging.cne_result_rows
     WHERE organ_code IS NULL
-      AND territory_code LIKE '__0000'
       AND municipality_name IS NOT NULL
     ON CONFLICT (territory_code) DO UPDATE
     SET territory_name = EXCLUDED.territory_name,
@@ -177,12 +184,19 @@ BEGIN
         territory_code,
         initcap(municipality_name),
         'municipality',
-        substring(territory_code from 1 for 2) || '0000',
-        substring(territory_code from 1 for 2) || '0000',
+        CASE
+            WHEN substring(territory_code from 1 for 2) IN ('31', '32') THEN '300000'
+            WHEN substring(territory_code from 1 for 2) BETWEEN '41' AND '49' THEN '400000'
+            ELSE substring(territory_code from 1 for 2) || '0000'
+        END,
+        CASE
+            WHEN substring(territory_code from 1 for 2) IN ('31', '32') THEN '300000'
+            WHEN substring(territory_code from 1 for 2) BETWEEN '41' AND '49' THEN '400000'
+            ELSE substring(territory_code from 1 for 2) || '0000'
+        END,
         territory_code
     FROM staging.cne_result_rows
     WHERE organ_code IN ('CM', 'AM')
-      AND parish_name IS NULL
       AND municipality_name IS NOT NULL
     ON CONFLICT (territory_code) DO UPDATE
     SET territory_name = EXCLUDED.territory_name,
@@ -204,7 +218,11 @@ BEGIN
         initcap(parish_name),
         'parish',
         substring(territory_code from 1 for 4) || '00',
-        substring(territory_code from 1 for 2) || '0000',
+        CASE
+            WHEN substring(territory_code from 1 for 2) IN ('31', '32') THEN '300000'
+            WHEN substring(territory_code from 1 for 2) BETWEEN '41' AND '49' THEN '400000'
+            ELSE substring(territory_code from 1 for 2) || '0000'
+        END,
         substring(territory_code from 1 for 4) || '00'
     FROM staging.cne_result_rows
     WHERE organ_code = 'AF'
@@ -333,7 +351,7 @@ BEGIN
      AND c.territory_code = em.territory_code
      AND c.organ_code = em.organ_code
      AND c.sigla = em.candidate_sigla
-    ON CONFLICT (election_id, territory_code, organ_code, candidacy_id, list_position) DO UPDATE
+    ON CONFLICT (election_id, territory_code, organ_code, candidacy_id, list_position, member_name) DO UPDATE
     SET member_name = EXCLUDED.member_name;
 END;
 $$;
@@ -422,12 +440,23 @@ SELECT
     turnout_results.null_votes,
     election.turnout_rate(turnout_results.voters, turnout_results.registered_voters) AS turnout_rate
 FROM election.vote_results
-JOIN election.elections USING (election_id)
-JOIN election.territories USING (territory_code)
-JOIN election.organs USING (organ_code)
-JOIN election.candidacies USING (candidacy_id)
-JOIN election.turnout_results USING (election_id, territory_code, organ_code)
-LEFT JOIN election.seat_results USING (election_id, territory_code, organ_code, candidacy_id);
+JOIN election.elections
+  ON elections.election_id = vote_results.election_id
+JOIN election.territories
+  ON territories.territory_code = vote_results.territory_code
+JOIN election.organs
+  ON organs.organ_code = vote_results.organ_code
+JOIN election.candidacies
+  ON candidacies.candidacy_id = vote_results.candidacy_id
+JOIN election.turnout_results
+  ON turnout_results.election_id = vote_results.election_id
+ AND turnout_results.territory_code = vote_results.territory_code
+ AND turnout_results.organ_code = vote_results.organ_code
+LEFT JOIN election.seat_results
+  ON seat_results.election_id = vote_results.election_id
+ AND seat_results.territory_code = vote_results.territory_code
+ AND seat_results.organ_code = vote_results.organ_code
+ AND seat_results.candidacy_id = vote_results.candidacy_id;
 
 CREATE OR REPLACE VIEW election.v_territory_winners AS
 SELECT *
@@ -527,14 +556,27 @@ BEGIN
         turnout_results.blank_votes,
         turnout_results.null_votes
     FROM election.vote_results
-    JOIN election.elections USING (election_id)
-    JOIN election.turnout_results USING (election_id, territory_code, organ_code)
-    JOIN election.candidacies USING (candidacy_id)
-    JOIN dw.dim_election USING (election_id)
-    JOIN dw.dim_organ USING (organ_code)
-    JOIN dw.dim_territory USING (territory_code)
-    JOIN dw.dim_candidacy USING (candidacy_id)
-    LEFT JOIN election.seat_results USING (election_id, territory_code, organ_code, candidacy_id);
+    JOIN election.elections
+      ON elections.election_id = vote_results.election_id
+    JOIN election.turnout_results
+      ON turnout_results.election_id = vote_results.election_id
+     AND turnout_results.territory_code = vote_results.territory_code
+     AND turnout_results.organ_code = vote_results.organ_code
+    JOIN election.candidacies
+      ON candidacies.candidacy_id = vote_results.candidacy_id
+    JOIN dw.dim_election
+      ON dim_election.election_id = elections.election_id
+    JOIN dw.dim_organ
+      ON dim_organ.organ_code = vote_results.organ_code
+    JOIN dw.dim_territory
+      ON dim_territory.territory_code = vote_results.territory_code
+    JOIN dw.dim_candidacy
+      ON dim_candidacy.candidacy_id = vote_results.candidacy_id
+    LEFT JOIN election.seat_results
+      ON seat_results.election_id = vote_results.election_id
+     AND seat_results.territory_code = vote_results.territory_code
+     AND seat_results.organ_code = vote_results.organ_code
+     AND seat_results.candidacy_id = vote_results.candidacy_id;
 
     REFRESH MATERIALIZED VIEW election.mv_result_summary;
     REFRESH MATERIALIZED VIEW election.mv_territory_winners;

@@ -17,7 +17,7 @@ from flask import Flask, Response, abort, g, render_template, request
 import db as _db
 
 app = Flask(__name__)
-app.config["DATABASE_URL"] = os.environ.get("DATABASE_URL", "postgresql://localhost/tabd")
+app.config["DATABASE_URL"] = os.environ.get("DATABASE_URL") or "dbname=tabd"
 
 # ---------------------------------------------------------------------------
 # Per-request DB connection via Flask g

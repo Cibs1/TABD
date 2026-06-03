@@ -100,7 +100,7 @@ CREATE TABLE election.elected_members (
     list_position integer NOT NULL CHECK (list_position > 0),
     member_name text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (election_id, territory_code, organ_code, candidacy_id, list_position)
+    UNIQUE (election_id, territory_code, organ_code, candidacy_id, list_position, member_name)
 );
 
 CREATE INDEX elected_members_lookup_idx

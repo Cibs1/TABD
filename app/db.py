@@ -7,7 +7,7 @@ import os
 import psycopg2
 import psycopg2.extras
 
-DSN = os.environ.get("DATABASE_URL", "postgresql://localhost/tabd")
+DSN = os.environ.get("DATABASE_URL") or "dbname=tabd"
 
 
 def get_conn():

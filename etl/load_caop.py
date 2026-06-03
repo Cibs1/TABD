@@ -1,16 +1,15 @@
 """
-Load CAOP 2021 administrative boundaries into election.territories.geom.
+Load CAOP administrative boundaries into election.territories.geom.
 
-Usage:
-    python3 etl/load_caop.py --caop-dir data/caop2021 --dsn postgresql://...
+Supports DGT CAOP GeoPackage files such as:
+    Continente_CAOP2025.gpkg
+    ArqMadeira_CAOP2025.gpkg
+    ArqAcores_GCentral_GOriental_CAOP2025.gpkg
+    ArqAcores_GOcidental_CAOP2025.gpkg
 
-Expected shapefile layout inside --caop-dir:
-    Cont_AAD_CAOP2021.shp   (or similar) - districts (Áreas de Distrito)
-    Cont_Conc_CAOP2021.shp               - municipalities (Concelhos)
-    Cont_Freg_CAOP2021.shp               - parishes (Freguesias)
-
-The shapefile attribute names vary slightly by CAOP version.
-Run with --dry-run first to print detected columns before committing.
+The assignment recommends CAOP 2021 for the 2021 election. CAOP 2025 is still
+usable if the report explicitly states it was chosen as a newer compatible DGT
+boundary dataset.
 """
 from __future__ import annotations
 
@@ -18,136 +17,189 @@ import argparse
 import os
 from pathlib import Path
 
-SRID = 3763  # PT-TM06 / ETRS89 — matches election.territories.geom
+SRID = 3763  # PT-TM06 / ETRS89, used by election.territories.geom.
 
 
-def _find_shapefile(directory: Path, keywords: list[str]) -> Path | None:
-    for path in sorted(directory.glob("*.shp")):
-        name_lower = path.stem.lower()
-        if all(k in name_lower for k in keywords):
-            return path
-    return None
+def _zero_pad(value: str, width: int) -> str:
+    return str(value).split(".")[0].strip().zfill(width)
 
 
-def _detect_code_column(gdf, candidates: list[str]) -> str:
-    for col in candidates:
-        if col in gdf.columns:
-            return col
+def _district_code_from_dt(value: str) -> str:
+    code = _zero_pad(value, 2)
+    if code in {"31", "32"}:
+        return "300000"
+    if "41" <= code <= "49":
+        return "400000"
+    return code + "0000"
+
+
+def _district_name_from_code(code: str, original_name: str) -> str:
+    if code == "300000":
+        return "R.A. Madeira"
+    if code == "400000":
+        return "R.A. Açores"
+    return original_name
+
+
+def _vector_files(directory: Path) -> list[Path]:
+    files = []
+    for suffix in ("*.gpkg", "*.shp"):
+        for path in directory.rglob(suffix):
+            if any(part in {".venv", "venv", "__pycache__"} for part in path.parts):
+                continue
+            files.append(path)
+    return sorted(files)
+
+
+def _matching_layers(path: Path, keyword: str) -> list[str | None]:
+    if path.suffix.lower() == ".shp":
+        return [None] if keyword in path.stem.lower() else []
+
+    import pyogrio
+
+    layers = pyogrio.list_layers(path)
+    return [
+        layer_name
+        for layer_name, geometry_type in layers
+        if geometry_type is not None and keyword in layer_name.lower()
+    ]
+
+
+def _read_layers(files: list[Path], keyword: str):
+    import geopandas as gpd
+    import pandas as pd
+
+    frames = []
+    for path in files:
+        for layer in _matching_layers(path, keyword):
+            label = f"{path.name}:{layer}" if layer else path.name
+            print(f"Reading {label}")
+            frame = gpd.read_file(path, layer=layer) if layer else gpd.read_file(path)
+            if frame.empty:
+                continue
+            frame = _to_project_srid(frame)
+            frames.append(frame)
+
+    if not frames:
+        return None
+
+    return gpd.GeoDataFrame(pd.concat(frames, ignore_index=True), crs=frames[0].crs)
+
+
+def _to_project_srid(gdf):
+    if gdf.crs is None:
+        raise ValueError("CAOP layer has no CRS; cannot safely load geometries.")
+    if gdf.crs.to_epsg() != SRID:
+        return gdf.to_crs(epsg=SRID)
+    return gdf
+
+
+def _detect_column(gdf, candidates: list[str]) -> str:
+    lower_map = {col.lower(): col for col in gdf.columns}
+    for candidate in candidates:
+        if candidate.lower() in lower_map:
+            return lower_map[candidate.lower()]
     raise ValueError(f"None of {candidates} found in columns: {list(gdf.columns)}")
 
 
-def _detect_name_column(gdf, candidates: list[str]) -> str:
-    for col in candidates:
-        if col in gdf.columns:
-            return col
-    raise ValueError(f"None of {candidates} found in columns: {list(gdf.columns)}")
+def _prepare_municipalities(gdf):
+    gdf = _to_project_srid(gdf)
+    code_col = _detect_column(gdf, ["dtmn", "dicofre", "codmun", "cod_mun"])
+    name_col = _detect_column(gdf, ["municipio", "concelho", "nome", "designacao"])
+    out = gdf.copy()
+    out["territory_code"] = out[code_col].apply(lambda value: _zero_pad(str(value)[:4], 4) + "00")
+    out["territory_name"] = out[name_col].astype(str).str.strip()
+    out = out.dissolve(by=["territory_code", "territory_name"], as_index=False)
+    return out[["territory_code", "territory_name", "geometry"]]
 
 
-def _zero_pad(value: str, width: int = 6) -> str:
-    cleaned = str(value).split(".")[0].strip().zfill(width)
-    return cleaned
+def _prepare_districts(gdf):
+    gdf = _to_project_srid(gdf)
+    code_col = _detect_column(gdf, ["dt", "codigo", "coddist"])
+    name_col = _detect_column(gdf, ["distrito", "distrito_ilha", "nome", "designacao"])
+    out = gdf.copy()
+    out["territory_code"] = out[code_col].apply(_district_code_from_dt)
+    out["territory_name"] = [
+        _district_name_from_code(code, name)
+        for code, name in zip(out["territory_code"], out[name_col].astype(str).str.strip(), strict=False)
+    ]
+    out = out.dissolve(by=["territory_code", "territory_name"], as_index=False)
+    return out[["territory_code", "territory_name", "geometry"]]
 
 
-def load_caop(dsn: str, caop_dir: Path, dry_run: bool = False):
+def _prepare_parishes(gdf):
+    gdf = _to_project_srid(gdf)
+    code_col = _detect_column(gdf, ["dtmnfr", "dicofre", "codfreg"])
+    name_col = _detect_column(gdf, ["freguesia", "nome", "designacao"])
+    out = gdf.copy()
+    out["territory_code"] = out[code_col].apply(lambda value: _zero_pad(value, 6))
+    out["territory_name"] = out[name_col].astype(str).str.strip()
+    out = out.dissolve(by=["territory_code", "territory_name"], as_index=False)
+    return out[["territory_code", "territory_name", "geometry"]]
+
+
+def load_caop(dsn: str | None, caop_dir: Path, dry_run: bool = False):
     try:
-        import geopandas as gpd
         import psycopg2
+        from shapely.wkb import dumps as wkb_dumps
     except ImportError as exc:
-        raise SystemExit(
-            "geopandas and psycopg2 are required. Install with: pip install geopandas psycopg2-binary"
-        ) from exc
+        raise SystemExit("psycopg2 and shapely are required. Install project requirements first.") from exc
 
     caop_dir = Path(caop_dir)
-    if not caop_dir.is_dir():
-        raise SystemExit(f"CAOP directory not found: {caop_dir}")
+    files = _vector_files(caop_dir)
+    if not files:
+        raise SystemExit(f"No .gpkg or .shp files found under {caop_dir}")
 
-    # --- Locate shapefiles ---
-    dist_shp = _find_shapefile(caop_dir, ["aad"]) or _find_shapefile(caop_dir, ["dist"])
-    conc_shp = _find_shapefile(caop_dir, ["conc"])
-    freg_shp = _find_shapefile(caop_dir, ["freg"])
+    print("CAOP files:")
+    for path in files:
+        print(f"  {path}")
 
-    if not conc_shp:
-        raise SystemExit(
-            f"Could not find municipality shapefile in {caop_dir}. "
-            "Expected a file with 'conc' in the name (e.g. Cont_Conc_CAOP2021.shp)."
-        )
+    municipalities_raw = _read_layers(files, "municipios")
+    districts_raw = _read_layers(files, "distritos")
+    parishes_raw = _read_layers(files, "freguesias")
 
-    print(f"Districts shapefile : {dist_shp}")
-    print(f"Municipalities      : {conc_shp}")
-    print(f"Parishes            : {freg_shp}")
+    if municipalities_raw is None:
+        raise SystemExit("No municipality layer found. Expected a layer containing 'municipios'.")
 
-    # --- Load and reproject to SRID 3763 ---
-    def load_shp(path):
-        gdf = gpd.read_file(path)
-        if gdf.crs is None:
-            gdf = gdf.set_crs("EPSG:4326")
-        if gdf.crs.to_epsg() != SRID:
-            gdf = gdf.to_crs(epsg=SRID)
-        return gdf
+    municipalities = _prepare_municipalities(municipalities_raw)
+    districts = _prepare_districts(districts_raw) if districts_raw is not None else None
+    parishes = _prepare_parishes(parishes_raw) if parishes_raw is not None else None
 
-    # --- Municipalities (mandatory) ---
-    conc_gdf = load_shp(conc_shp)
-    print(f"\nMunicipality columns: {list(conc_gdf.columns)}")
+    print(f"\nPrepared municipalities: {len(municipalities)}")
+    print(municipalities[["territory_code", "territory_name"]].head(10).to_string(index=False))
 
-    conc_code_col = _detect_code_column(conc_gdf, ["Dicofre", "DICOFRE", "CodMunic", "CODMUN", "COD_MUN", "DICO"])
-    conc_name_col = _detect_name_column(conc_gdf, ["Concelho", "CONCELHO", "Designacao", "DESIGNACAO", "Nome", "NOME"])
+    if districts is not None:
+        print(f"\nPrepared districts/regions: {len(districts)}")
+        print(districts[["territory_code", "territory_name"]].to_string(index=False))
+    else:
+        print("\nNo district layers found; districts/regions will be dissolved from municipalities.")
+        districts = municipalities.copy()
+        districts["territory_code"] = districts["territory_code"].str[:2].apply(_district_code_from_dt)
+        districts["territory_name"] = districts["territory_code"].map({
+            "300000": "R.A. Madeira",
+            "400000": "R.A. Açores",
+        }).fillna(districts["territory_code"].str[:2])
+        districts = districts.dissolve(by=["territory_code", "territory_name"], as_index=False)
+        districts = districts[["territory_code", "territory_name", "geometry"]]
 
-    # Municipality codes in CAOP are 4-digit (DDMM); pad to 6 digits (DDMM00)
-    conc_gdf["territory_code"] = conc_gdf[conc_code_col].apply(
-        lambda v: _zero_pad(str(v)[:4], 4) + "00"
-    )
-    conc_gdf["territory_name"] = conc_gdf[conc_name_col].str.strip()
+    if parishes is not None:
+        print(f"\nPrepared parishes: {len(parishes)}")
+        print(parishes[["territory_code", "territory_name"]].head(10).to_string(index=False))
+    else:
+        print("\nNo parish layers found; parish geometries will not be loaded.")
 
     if dry_run:
-        print("\nMunicipality sample:")
-        print(conc_gdf[["territory_code", "territory_name"]].head(10).to_string(index=False))
-
-    # --- Districts (optional — derive from municipalities if shapefile missing) ---
-    if dist_shp:
-        dist_gdf = load_shp(dist_shp)
-        print(f"\nDistrict columns: {list(dist_gdf.columns)}")
-        dist_code_col = _detect_code_column(dist_gdf, ["Codigo", "CODIGO", "CodDist", "CODDIST", "Dico", "DICO"])
-        dist_name_col = _detect_name_column(dist_gdf, ["Distrito", "DISTRITO", "Designacao", "DESIGNACAO", "Nome", "NOME"])
-        dist_gdf["territory_code"] = dist_gdf[dist_code_col].apply(
-            lambda v: _zero_pad(str(v)[:2], 2) + "0000"
-        )
-        dist_gdf["territory_name"] = dist_gdf[dist_name_col].str.strip()
-        if dry_run:
-            print("\nDistrict sample:")
-            print(dist_gdf[["territory_code", "territory_name"]].head(5).to_string(index=False))
-    else:
-        dist_gdf = None
-        print("\nNo district shapefile found — district geometries will be dissolved from municipalities.")
-
-    # --- Parishes (optional) ---
-    if freg_shp:
-        freg_gdf = load_shp(freg_shp)
-        print(f"\nParish columns: {list(freg_gdf.columns)}")
-        freg_code_col = _detect_code_column(freg_gdf, ["Dicofre", "DICOFRE", "Dico", "DICO", "CodFreg", "CODFREG"])
-        freg_name_col = _detect_name_column(freg_gdf, ["Freguesia", "FREGUESIA", "Designacao", "DESIGNACAO", "Nome", "NOME"])
-        freg_gdf["territory_code"] = freg_gdf[freg_code_col].apply(
-            lambda v: _zero_pad(str(v), 6)
-        )
-        freg_gdf["territory_name"] = freg_gdf[freg_name_col].str.strip()
-        if dry_run:
-            print("\nParish sample:")
-            print(freg_gdf[["territory_code", "territory_name"]].head(5).to_string(index=False))
-    else:
-        freg_gdf = None
-        print("\nNo parish shapefile found — parish geometries will not be loaded.")
-
-    if dry_run:
-        print("\nDry run complete. Re-run without --dry-run to load into PostgreSQL.")
+        print("\nDry run complete. Re-run without --dry-run to update PostGIS geometries.")
         return
 
-    # --- Write to PostgreSQL ---
-    from shapely.wkb import dumps as wkb_dumps
+    if not dsn:
+        raise SystemExit("Missing --dsn or DATABASE_URL.")
 
     conn = psycopg2.connect(dsn)
     conn.autocommit = False
     cur = conn.cursor()
 
-    def update_geom(gdf, code_col="territory_code"):
+    def update_geom(gdf, label: str):
         updated = 0
         skipped = 0
         for _, row in gdf.iterrows():
@@ -159,37 +211,20 @@ def load_caop(dsn: str, caop_dir: Path, dry_run: bool = False):
             cur.execute(
                 """
                 UPDATE election.territories
-                SET geom = %s::geometry
+                SET geom = ST_Multi(%s::geometry)
                 WHERE territory_code = %s
                 """,
-                (wkb, row[code_col]),
+                (wkb, row["territory_code"]),
             )
             updated += cur.rowcount
             if cur.rowcount == 0:
                 skipped += 1
-        return updated, skipped
+        print(f"{label}: updated={updated} skipped/unmatched={skipped}")
 
-    print("\nUpdating municipality geometries...")
-    u, s = update_geom(conc_gdf)
-    print(f"  updated={u}  skipped/unmatched={s}")
-
-    if dist_gdf is not None:
-        print("Updating district geometries...")
-        u, s = update_geom(dist_gdf)
-        print(f"  updated={u}  skipped/unmatched={s}")
-    else:
-        print("Dissolving district geometries from municipalities...")
-        dist_dissolved = conc_gdf.copy()
-        dist_dissolved["dist_code"] = dist_dissolved["territory_code"].str[:2] + "0000"
-        dist_dissolved = dist_dissolved.dissolve(by="dist_code", as_index=False)[["dist_code", "geometry"]]
-        dist_dissolved.rename(columns={"dist_code": "territory_code"}, inplace=True)
-        u, s = update_geom(dist_dissolved)
-        print(f"  updated={u}  skipped/unmatched={s}")
-
-    if freg_gdf is not None:
-        print("Updating parish geometries...")
-        u, s = update_geom(freg_gdf)
-        print(f"  updated={u}  skipped/unmatched={s}")
+    update_geom(municipalities, "Municipalities")
+    update_geom(districts, "Districts/regions")
+    if parishes is not None:
+        update_geom(parishes, "Parishes")
 
     conn.commit()
     cur.close()
@@ -198,18 +233,11 @@ def load_caop(dsn: str, caop_dir: Path, dry_run: bool = False):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Load CAOP 2021 boundaries into election.territories.geom.")
-    parser.add_argument("--caop-dir", default="data/caop2021", type=Path,
-                        help="Directory containing CAOP shapefiles (default: data/caop2021)")
-    parser.add_argument("--dsn", default=os.environ.get("DATABASE_URL"),
-                        help="PostgreSQL DSN (or set DATABASE_URL env var)")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Print detected columns and sample data without touching the database")
+    parser = argparse.ArgumentParser(description="Load CAOP boundaries into election.territories.geom.")
+    parser.add_argument("--caop-dir", default=".", type=Path)
+    parser.add_argument("--dsn", default=os.environ.get("DATABASE_URL"))
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-
-    if not args.dry_run and not args.dsn:
-        raise SystemExit("Missing --dsn or DATABASE_URL. Use --dry-run to inspect without connecting.")
-
     load_caop(args.dsn, args.caop_dir, dry_run=args.dry_run)
 
 

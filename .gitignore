@@ -1,5 +1,11 @@
 __pycache__/
 *.py[cod]
 .venv/
+venv/
 .env
 *.log
+*.aux
+*.nav
+*.out
+*.snm
+*.toc

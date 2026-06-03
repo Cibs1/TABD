@@ -4,6 +4,7 @@ import argparse
 import csv
 import io
 import os
+import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -80,7 +81,7 @@ def normalize_code(value: str) -> str:
 
 
 def text_or_none(value: str):
-    value = (value or "").strip()
+    value = re.sub(r"\s+", " ", (value or "")).strip()
     return value or None
 
 
