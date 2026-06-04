@@ -66,10 +66,10 @@ The project focuses on Portuguese local elections (\emph{Eleições Autárquicas
 The official election data sources are:
 
 \begin{itemize}
-  \item \texttt{data/raw/cne/al2013\_mapaoficial\_retif}: official CNE 2013 results package, converted from legacy \texttt{.xls} to \texttt{.xlsx};
-  \item \texttt{data/raw/cne/al2017\_mapaoficial\_retif02\_01out2018}: official CNE 2017 results package, converted from legacy \texttt{.xls} to \texttt{.xlsx};
-  \item \texttt{data/raw/cne/2021al\_mapa\_oficial}: official CNE 2021 results package;
-  \item \texttt{data/raw/cne/2025al-mapa-oficial\_retificado}: official CNE 2025 results package including the published correction.
+  \item \texttt{al2013\_mapaoficial\_retif}: official CNE 2013 results package, converted from legacy \texttt{.xls} to \texttt{.xlsx};
+  \item \texttt{al2017\_mapaoficial\_retif02\_01out2018}: official CNE 2017 results package, converted from legacy \texttt{.xls} to \texttt{.xlsx};
+  \item \texttt{2021al\_mapa\_oficial}: official CNE 2021 results package;
+  \item \texttt{2025al-mapa-oficial\_retificado}: official CNE 2025 results package including the published correction.
 \end{itemize}
 
 Each package contains the same logical maps:
@@ -105,28 +105,70 @@ The operational schema is normalized around elections, organs, territories, cand
 
 \begin{figure*}[t]
 \centering
-\begin{tikzpicture}[node distance=0.7cm and 1.0cm]
-  \node[entity] (elections) {\textbf{elections}\\election\_id PK\\election\_code UQ\\date, source};
-  \node[entity, right=of elections] (organs) {\textbf{organs}\\organ\_code PK\\CM, AM, AF\\territory level};
-  \node[entity, right=of organs] (territories) {\textbf{territories}\\territory\_code PK\\level, parent\\geom};
-  \node[entity, below=of organs] (candidacies) {\textbf{candidacies}\\candidacy\_id PK\\election/organ/territory FK\\sigla, type};
+\begin{tikzpicture}[
+  node distance=1.2cm and 1.8cm,
+  entity/.style={draw, rectangle, rounded corners=2pt,
+                 align=left, font=\small,
+                 inner sep=6pt, fill=white},
+  rel/.style={->, >=stealth, thick}
+]
 
-  \node[entity, below left=of candidacies] (turnout) {\textbf{turnout\_results}\\election FK\\territory FK\\organ FK\\registered, voters\\blank, null};
-  \node[entity, below=of candidacies] (votes) {\textbf{vote\_results}\\election FK\\territory FK\\organ FK\\candidacy FK\\votes};
-  \node[entity, below right=of candidacies] (seats) {\textbf{seat\_results}\\election FK\\territory FK\\organ FK\\candidacy FK\\percentage, mandates};
-  \node[entity, right=of seats] (elected) {\textbf{elected\_members}\\election FK\\territory FK\\organ FK\\candidacy FK\\position, name};
+%% ── Top row ──────────────────────────────────────────────────────────
+\node[entity] (elections) {%
+  \textbf{elections}\\election\_id PK\\election\_code UQ\\date, source};
 
-  \draw[rel] (elections) -- (candidacies);
-  \draw[rel] (organs) -- (candidacies);
-  \draw[rel] (territories) -- (candidacies);
-  \draw[rel] (elections) |- (turnout);
-  \draw[rel] (organs) |- (turnout);
-  \draw[rel] (territories) |- (turnout);
-  \draw[rel] (candidacies) -- (votes);
-  \draw[rel] (candidacies) -- (seats);
-  \draw[rel] (candidacies) |- (elected);
+\node[entity, right=of elections] (organs) {%
+  \textbf{organs}\\organ\_code PK\\CM, AM, AF\\territory level};
+
+\node[entity, right=of organs] (territories) {%
+  \textbf{territories}\\territory\_code PK\\level, parent\\geom};
+
+%% ── Middle ───────────────────────────────────────────────────────────
+\node[entity, below=1.6cm of organs] (candidacies) {%
+  \textbf{candidacies}\\candidacy\_id PK\\election/organ/territory FK\\sigla, type};
+
+%% ── Bottom row ───────────────────────────────────────────────────────
+\node[entity, below=1.6cm of candidacies, xshift=-4.2cm] (turnout) {%
+  \textbf{turnout\_results}\\election FK\\territory FK\\organ FK\\registered, voters\\blank, null};
+
+\node[entity, below=1.6cm of candidacies] (votes) {%
+  \textbf{vote\_results}\\election FK\\territory FK\\organ FK\\candidacy FK\\votes};
+
+\node[entity, below=1.6cm of candidacies, xshift=3.8cm] (seats) {%
+  \textbf{seat\_results}\\election FK\\territory FK\\organ FK\\candidacy FK\\percentage, mandates};
+
+\node[entity, right=1.6cm of seats] (elected) {%
+  \textbf{elected\_members}\\election FK\\territory FK\\organ FK\\candidacy FK\\position, name};
+
+%% ── Direct edges: top row → candidacies ─────────────────────────────
+\draw[rel] (elections.south)  -- (candidacies.west);
+\draw[rel] (organs.south)     -- (candidacies.north);
+\draw[rel] (territories.south)-- (candidacies.east);
+
+%% ── candidacies → result nodes ───────────────────────────────────────
+\draw[rel] (candidacies.south west) -- (turnout.north east);
+\draw[rel] (candidacies.south)      -- (votes.north);
+\draw[rel] (candidacies.south east) -- (seats.north west);
+\draw[rel] (candidacies.east)       -| (elected.north);
+
+%% ── elections / organs / territories → turnout ───────────────────────
+%% Route left of the elections box to avoid crossing entities
+\draw[rel] (elections.west)
+    -- ++(-0.6,0)
+    |- (turnout.west);
+
+\draw[rel] (organs.west)
+    -- ++(-0.3,0)
+    |- ([yshift=0.15cm]turnout.north);
+
+%% Route right of territories box then down
+\draw[rel] (territories.east)
+    -- ++(0.6,0)
+    |- ([yshift=-0.15cm]turnout.north);
+
 \end{tikzpicture}
-\caption{Simplified operational ER diagram. Primary entities are elections, organs, territories, and candidacies; result tables reference these dimensions.}
+\caption{Simplified operational ER diagram. Primary entities are elections, organs,
+territories, and candidacies; result tables reference these dimensions.}
 \label{fig:operational-er}
 \end{figure*}
 
@@ -164,7 +206,7 @@ Election & Result rows & Vote rows & Elected parsed\\
 \midrule
 AL2013 & 3738 & 12152 & 35579\\
 AL2017 & 3729 & 12069 & 35709\\
-AL2021 & 3729 & 12295 & 35491\\
+AL2021 & 3719 & 12277 & 35491\\
 AL2025 & 3897 & 12839 & 36521\\
 \bottomrule
 \end{tabular}
@@ -279,7 +321,7 @@ The database was loaded and validated on a local PostgreSQL/PostGIS database nam
 \begin{verbatim}
 .venv/bin/python etl/load_cne_2021.py --setup \
   --dsn "dbname=tabd" \
-  --source-dir data/raw/cne/2021al_mapa_oficial \
+  --source-dir 2021al_mapa_oficial \
   --election-code AL2021 \
   --election-date 2021-09-26
 \end{verbatim}
@@ -297,9 +339,9 @@ Election fact & Rows\\
 \midrule
 \texttt{AL2013 vote\_results} & 12152\\
 \texttt{AL2017 vote\_results} & 12069\\
-\texttt{AL2021 vote\_results} & 12295\\
+\texttt{AL2021 vote\_results} & 12277\\
 \texttt{AL2025 vote\_results} & 12839\\
-\texttt{dw.fact\_election\_results} & 49355\\
+\texttt{dw.fact\_election\_results} & 49337\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -354,26 +396,26 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python etl/load_cne_2021.py \
   --setup --dsn "dbname=tabd" \
-  --source-dir data/raw/cne/2021al_mapa_oficial \
+  --source-dir 2021al_mapa_oficial \
   --election-code AL2021 \
   --election-date 2021-09-26
 .venv/bin/python etl/load_cne_2021.py \
   --dsn "dbname=tabd" \
-  --source-dir data/raw/cne/al2013_mapaoficial_retif \
+  --source-dir al2013_mapaoficial_retif \
   --election-code AL2013 \
   --election-date 2013-09-29
 .venv/bin/python etl/load_cne_2021.py \
   --dsn "dbname=tabd" \
-  --source-dir data/raw/cne/al2017_mapaoficial_retif02_01out2018 \
+  --source-dir al2017_mapaoficial_retif02_01out2018 \
   --election-code AL2017 \
   --election-date 2017-10-01
 .venv/bin/python etl/load_cne_2021.py \
   --dsn "dbname=tabd" \
-  --source-dir data/raw/cne/2025al-mapa-oficial_retificado \
+  --source-dir 2025al-mapa-oficial_retificado \
   --election-code AL2025 \
   --election-date 2025-10-12
 .venv/bin/python etl/load_caop.py \
-  --caop-dir data/raw/caop --dsn "dbname=tabd"
+  --caop-dir . --dsn "dbname=tabd"
 .venv/bin/flask --app app/app.py run
 \end{verbatim}
 
