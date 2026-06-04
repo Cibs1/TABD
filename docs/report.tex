@@ -66,10 +66,10 @@ The project focuses on Portuguese local elections (\emph{Eleições Autárquicas
 The official election data sources are:
 
 \begin{itemize}
-  \item \texttt{al2013\_mapaoficial\_retif}: official CNE 2013 results package, converted from legacy \texttt{.xls} to \texttt{.xlsx};
-  \item \texttt{al2017\_mapaoficial\_retif02\_01out2018}: official CNE 2017 results package, converted from legacy \texttt{.xls} to \texttt{.xlsx};
-  \item \texttt{2021al\_mapa\_oficial}: official CNE 2021 results package;
-  \item \texttt{2025al-mapa-oficial\_retificado}: official CNE 2025 results package including the published correction.
+  \item \texttt{data/raw/cne/al2013\_mapaoficial\_retif}: official CNE 2013 results package, converted from legacy \texttt{.xls} to \texttt{.xlsx};
+  \item \texttt{data/raw/cne/al2017\_mapaoficial\_retif02\_01out2018}: official CNE 2017 results package, converted from legacy \texttt{.xls} to \texttt{.xlsx};
+  \item \texttt{data/raw/cne/2021al\_mapa\_oficial}: official CNE 2021 results package;
+  \item \texttt{data/raw/cne/2025al-mapa-oficial\_retificado}: official CNE 2025 results package including the published correction.
 \end{itemize}
 
 Each package contains the same logical maps:
@@ -164,7 +164,7 @@ Election & Result rows & Vote rows & Elected parsed\\
 \midrule
 AL2013 & 3738 & 12152 & 35579\\
 AL2017 & 3729 & 12069 & 35709\\
-AL2021 & 3719 & 12277 & 35491\\
+AL2021 & 3729 & 12295 & 35491\\
 AL2025 & 3897 & 12839 & 36521\\
 \bottomrule
 \end{tabular}
@@ -279,7 +279,7 @@ The database was loaded and validated on a local PostgreSQL/PostGIS database nam
 \begin{verbatim}
 .venv/bin/python etl/load_cne_2021.py --setup \
   --dsn "dbname=tabd" \
-  --source-dir 2021al_mapa_oficial \
+  --source-dir data/raw/cne/2021al_mapa_oficial \
   --election-code AL2021 \
   --election-date 2021-09-26
 \end{verbatim}
@@ -297,9 +297,9 @@ Election fact & Rows\\
 \midrule
 \texttt{AL2013 vote\_results} & 12152\\
 \texttt{AL2017 vote\_results} & 12069\\
-\texttt{AL2021 vote\_results} & 12277\\
+\texttt{AL2021 vote\_results} & 12295\\
 \texttt{AL2025 vote\_results} & 12839\\
-\texttt{dw.fact\_election\_results} & 49337\\
+\texttt{dw.fact\_election\_results} & 49355\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -354,26 +354,26 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python etl/load_cne_2021.py \
   --setup --dsn "dbname=tabd" \
-  --source-dir 2021al_mapa_oficial \
+  --source-dir data/raw/cne/2021al_mapa_oficial \
   --election-code AL2021 \
   --election-date 2021-09-26
 .venv/bin/python etl/load_cne_2021.py \
   --dsn "dbname=tabd" \
-  --source-dir al2013_mapaoficial_retif \
+  --source-dir data/raw/cne/al2013_mapaoficial_retif \
   --election-code AL2013 \
   --election-date 2013-09-29
 .venv/bin/python etl/load_cne_2021.py \
   --dsn "dbname=tabd" \
-  --source-dir al2017_mapaoficial_retif02_01out2018 \
+  --source-dir data/raw/cne/al2017_mapaoficial_retif02_01out2018 \
   --election-code AL2017 \
   --election-date 2017-10-01
 .venv/bin/python etl/load_cne_2021.py \
   --dsn "dbname=tabd" \
-  --source-dir 2025al-mapa-oficial_retificado \
+  --source-dir data/raw/cne/2025al-mapa-oficial_retificado \
   --election-code AL2025 \
   --election-date 2025-10-12
 .venv/bin/python etl/load_caop.py \
-  --caop-dir . --dsn "dbname=tabd"
+  --caop-dir data/raw/caop --dsn "dbname=tabd"
 .venv/bin/flask --app app/app.py run
 \end{verbatim}
 

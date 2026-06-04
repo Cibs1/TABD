@@ -17,10 +17,10 @@ The current implementation uses official CNE Autarquicas spreadsheet packages fo
 The CNE files should be in:
 
 ```text
-al2013_mapaoficial_retif/
-al2017_mapaoficial_retif02_01out2018/
-2021al_mapa_oficial/
-2025al-mapa-oficial_retificado/
+data/raw/cne/al2013_mapaoficial_retif/
+data/raw/cne/al2017_mapaoficial_retif02_01out2018/
+data/raw/cne/2021al_mapa_oficial/
+data/raw/cne/2025al-mapa-oficial_retificado/
 ```
 
 The ETL uses the logical CNE maps present in each package:
@@ -33,9 +33,9 @@ The ETL uses the logical CNE maps present in each package:
 For maps, use the DGT CAOP GeoPackages currently placed in:
 
 ```text
-CAOP_Continente_2025-gpkg/
-CAOP_RAM_2025-gpkg/
-CAOP_RAA_2025-gpkg/
+data/raw/caop/CAOP_Continente_2025-gpkg/
+data/raw/caop/CAOP_RAM_2025-gpkg/
+data/raw/caop/CAOP_RAA_2025-gpkg/
 ```
 
 The assignment recommends CAOP 2021 to match the baseline election year. This project uses CAOP 2025 as a newer compatible DGT administrative-boundary dataset for all loaded elections; mention this choice in the report.
@@ -78,10 +78,10 @@ python3 etl/load_cne_2021.py --dry-run
 Expected counts:
 
 ```text
-result rows:       3719
+result rows:       3729
 candidate aliases: 2755
-candidate votes:   12277
-percent/mandates:  12277
+candidate votes:   12295
+percent/mandates:  12295
 elected members:   35491
 ```
 
@@ -95,7 +95,7 @@ Create schemas and load the baseline 2021 database:
 
 ```bash
 python3 etl/load_cne_2021.py --setup --dsn "dbname=tabd" \
-  --source-dir 2021al_mapa_oficial \
+  --source-dir data/raw/cne/2021al_mapa_oficial \
   --election-code AL2021 \
   --election-name "Eleições Autárquicas 2021" \
   --election-date 2021-09-26
@@ -108,52 +108,52 @@ The ETL can also load the 2013, 2017, and 2025 official CNE Autarquicas packages
 Detected local folders:
 
 ```text
-al2013_mapaoficial_retif/
-al2017_mapaoficial_retif02_01out2018/
-2021al_mapa_oficial/
-2025al-mapa-oficial_retificado/
+data/raw/cne/al2013_mapaoficial_retif/
+data/raw/cne/al2017_mapaoficial_retif02_01out2018/
+data/raw/cne/2021al_mapa_oficial/
+data/raw/cne/2025al-mapa-oficial_retificado/
 ```
 
 The 2013 and 2017 packages ship as legacy `.xls`/`.ods` files. Convert the `.xls` files once before loading:
 
 ```bash
 libreoffice --headless --convert-to xlsx \
-  --outdir al2013_mapaoficial_retif \
-  al2013_mapaoficial_retif/*.xls
+  --outdir data/raw/cne/al2013_mapaoficial_retif \
+  data/raw/cne/al2013_mapaoficial_retif/*.xls
 
 libreoffice --headless --convert-to xlsx \
-  --outdir al2017_mapaoficial_retif02_01out2018 \
-  al2017_mapaoficial_retif02_01out2018/*.xls
+  --outdir data/raw/cne/al2017_mapaoficial_retif02_01out2018 \
+  data/raw/cne/al2017_mapaoficial_retif02_01out2018/*.xls
 ```
 
 Then rebuild and load all four elections:
 
 ```bash
 .venv/bin/python etl/load_cne_2021.py --setup --dsn "dbname=tabd" \
-  --source-dir 2021al_mapa_oficial \
+  --source-dir data/raw/cne/2021al_mapa_oficial \
   --election-code AL2021 \
   --election-name "Eleições Autárquicas 2021" \
   --election-date 2021-09-26
 
 .venv/bin/python etl/load_cne_2021.py --dsn "dbname=tabd" \
-  --source-dir al2013_mapaoficial_retif \
+  --source-dir data/raw/cne/al2013_mapaoficial_retif \
   --election-code AL2013 \
   --election-name "Eleições Autárquicas 2013" \
   --election-date 2013-09-29
 
 .venv/bin/python etl/load_cne_2021.py --dsn "dbname=tabd" \
-  --source-dir al2017_mapaoficial_retif02_01out2018 \
+  --source-dir data/raw/cne/al2017_mapaoficial_retif02_01out2018 \
   --election-code AL2017 \
   --election-name "Eleições Autárquicas 2017" \
   --election-date 2017-10-01
 
 .venv/bin/python etl/load_cne_2021.py --dsn "dbname=tabd" \
-  --source-dir 2025al-mapa-oficial_retificado \
+  --source-dir data/raw/cne/2025al-mapa-oficial_retificado \
   --election-code AL2025 \
   --election-name "Eleições Autárquicas 2025" \
   --election-date 2025-10-12
 
-.venv/bin/python etl/load_caop.py --caop-dir . --dsn "dbname=tabd"
+.venv/bin/python etl/load_caop.py --caop-dir data/raw/caop --dsn "dbname=tabd"
 ```
 
 Run historical comparison queries:
@@ -167,19 +167,19 @@ psql -d tabd -f sql/08_historical_comparisons.sql
 Inspect detected GeoPackage layers and columns:
 
 ```bash
-.venv/bin/python etl/load_caop.py --caop-dir . --dry-run
+.venv/bin/python etl/load_caop.py --caop-dir data/raw/caop --dry-run
 ```
 
 Load geometries into `election.territories.geom`:
 
 ```bash
-.venv/bin/python etl/load_caop.py --caop-dir . --dsn "dbname=tabd"
+.venv/bin/python etl/load_caop.py --caop-dir data/raw/caop --dsn "dbname=tabd"
 ```
 
 Expected loaded geometry coverage:
 
 ```text
-district        20 / 20
+district        20 / 21   # national aggregate has no polygon
 municipality   308 / 308
 parish        3241 / 3394   # after loading 2013, 2017, 2021, and 2025
 ```

@@ -43,7 +43,7 @@ Current loaded vote-result counts:
 ```text
 AL2013: 12152
 AL2017: 12069
-AL2021: 12277
+AL2021: 12295
 AL2025: 12839
 ```
 
@@ -95,9 +95,9 @@ Implemented:
 Loaded geometry counts:
 
 ```text
-district        20 / 20
+district        20 / 21   # national aggregate has no polygon
 municipality   308 / 308
-parish        2949 / 3083
+parish        3241 / 3394
 ```
 
 The Flask GeoJSON map endpoint has been tested against the loaded database and returns 308 municipality features.
@@ -105,7 +105,7 @@ The Flask GeoJSON map endpoint has been tested against the loaded database and r
 After loading all four election packages, parish territory coverage is:
 
 ```text
-district        20 / 20
+district        20 / 21   # national aggregate has no polygon
 municipality   308 / 308
 parish        3241 / 3394
 ```

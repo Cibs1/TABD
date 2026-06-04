@@ -234,7 +234,7 @@ def load_caop(dsn: str | None, caop_dir: Path, dry_run: bool = False):
 
 def main():
     parser = argparse.ArgumentParser(description="Load CAOP boundaries into election.territories.geom.")
-    parser.add_argument("--caop-dir", default=".", type=Path)
+    parser.add_argument("--caop-dir", default="data/raw/caop", type=Path)
     parser.add_argument("--dsn", default=os.environ.get("DATABASE_URL"))
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()

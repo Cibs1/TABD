@@ -619,7 +619,7 @@ def export_processed(data: ParsedCneData, output_dir: Path):
 
 def main():
     parser = argparse.ArgumentParser(description="Load CNE Autarquicas spreadsheets into PostgreSQL.")
-    parser.add_argument("--source-dir", default="2021al_mapa_oficial", type=Path)
+    parser.add_argument("--source-dir", default="data/raw/cne/2021al_mapa_oficial", type=Path)
     parser.add_argument("--election-code", default="AL2021")
     parser.add_argument("--election-name", default="Eleições Autárquicas 2021")
     parser.add_argument("--election-date", default="2021-09-26")
