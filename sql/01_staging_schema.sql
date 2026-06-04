@@ -82,7 +82,7 @@ CREATE TABLE staging.cne_elected_members (
     list_position integer NOT NULL,
     member_name text NOT NULL,
     loaded_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (source_file, source_row, election_code, candidate_sigla)
+    PRIMARY KEY (source_file, source_row, election_code, candidate_sigla, list_position)
 );
 
 CREATE INDEX cne_elected_members_lookup_idx

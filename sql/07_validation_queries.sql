@@ -36,6 +36,7 @@ SELECT sigla, votes, vote_share, mandates
 FROM election.mv_result_summary
 WHERE territory_code = '010100'
   AND organ_code = 'CM'
+  AND election_code = 'AL2021'
 ORDER BY votes DESC;
 
 -- D'Hondt allocation for Agueda CM. The total seats are 7.
@@ -53,6 +54,7 @@ official AS (
     FROM election.mv_result_summary
     WHERE territory_code = '010100'
       AND organ_code = 'CM'
+      AND election_code = 'AL2021'
 )
 SELECT
     COALESCE(official.sigla, calculated.sigla) AS sigla,

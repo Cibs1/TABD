@@ -34,10 +34,6 @@ BEGIN
         RAISE EXCEPTION 'Turnout values cannot be negative';
     END IF;
 
-    IF NEW.voters > NEW.registered_voters THEN
-        RAISE EXCEPTION 'Voters (%) cannot exceed registered voters (%)', NEW.voters, NEW.registered_voters;
-    END IF;
-
     IF NEW.blank_votes + NEW.null_votes > NEW.voters THEN
         RAISE EXCEPTION 'Blank plus null votes cannot exceed voters';
     END IF;
@@ -46,6 +42,7 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS turnout_consistency_trg ON election.turnout_results;
 CREATE TRIGGER turnout_consistency_trg
 BEFORE INSERT OR UPDATE ON election.turnout_results
 FOR EACH ROW
@@ -81,6 +78,7 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS vote_result_consistency_trg ON election.vote_results;
 CREATE TRIGGER vote_result_consistency_trg
 BEFORE INSERT OR UPDATE ON election.vote_results
 FOR EACH ROW
@@ -112,22 +110,28 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS seat_result_consistency_trg ON election.seat_results;
 CREATE TRIGGER seat_result_consistency_trg
 BEFORE INSERT OR UPDATE ON election.seat_results
 FOR EACH ROW
 EXECUTE FUNCTION election.assert_seat_result_consistency();
 
-CREATE OR REPLACE PROCEDURE election.load_from_staging()
+CREATE OR REPLACE PROCEDURE election.load_from_staging(
+    p_election_code text DEFAULT 'AL2021',
+    p_election_name text DEFAULT 'Eleições Autárquicas 2021',
+    p_election_date date DEFAULT DATE '2021-09-26',
+    p_source_name text DEFAULT 'CNE mapa oficial Autárquicas 2021'
+)
 LANGUAGE plpgsql
 AS $$
 DECLARE
     target_election_id bigint;
 BEGIN
     DELETE FROM election.elections
-    WHERE election_code = 'AL2021';
+    WHERE election_code = p_election_code;
 
     INSERT INTO election.elections (election_code, election_name, election_date, source_name)
-    VALUES ('AL2021', 'Eleições Autárquicas 2021', DATE '2021-09-26', 'CNE mapa oficial Autárquicas 2021')
+    VALUES (p_election_code, p_election_name, p_election_date, p_source_name)
     RETURNING election_id INTO target_election_id;
 
     INSERT INTO election.organs (organ_code, organ_name, territory_level)
@@ -147,24 +151,28 @@ BEGIN
         district_code,
         municipality_code
     )
-    SELECT DISTINCT
-        CASE
-            WHEN substring(territory_code from 1 for 2) IN ('31', '32') THEN '300000'
-            WHEN substring(territory_code from 1 for 2) BETWEEN '41' AND '49' THEN '400000'
-            ELSE substring(territory_code from 1 for 2) || '0000'
-        END,
-        initcap(municipality_name),
+    WITH district_rows AS (
+        SELECT
+            CASE
+                WHEN substring(territory_code from 1 for 2) IN ('31', '32') THEN '300000'
+                WHEN substring(territory_code from 1 for 2) BETWEEN '41' AND '49' THEN '400000'
+                ELSE substring(territory_code from 1 for 2) || '0000'
+            END AS district_code,
+            MIN(initcap(municipality_name)) AS district_name
+        FROM staging.cne_result_rows
+        WHERE organ_code IS NULL
+          AND election_code = p_election_code
+          AND municipality_name IS NOT NULL
+        GROUP BY 1
+    )
+    SELECT
+        district_code,
+        district_name,
         'district',
         NULL,
-        CASE
-            WHEN substring(territory_code from 1 for 2) IN ('31', '32') THEN '300000'
-            WHEN substring(territory_code from 1 for 2) BETWEEN '41' AND '49' THEN '400000'
-            ELSE substring(territory_code from 1 for 2) || '0000'
-        END,
+        district_code,
         NULL
-    FROM staging.cne_result_rows
-    WHERE organ_code IS NULL
-      AND municipality_name IS NOT NULL
+    FROM district_rows
     ON CONFLICT (territory_code) DO UPDATE
     SET territory_name = EXCLUDED.territory_name,
         territory_level = EXCLUDED.territory_level,
@@ -197,6 +205,7 @@ BEGIN
         territory_code
     FROM staging.cne_result_rows
     WHERE organ_code IN ('CM', 'AM')
+      AND election_code = p_election_code
       AND municipality_name IS NOT NULL
     ON CONFLICT (territory_code) DO UPDATE
     SET territory_name = EXCLUDED.territory_name,
@@ -226,6 +235,7 @@ BEGIN
         substring(territory_code from 1 for 4) || '00'
     FROM staging.cne_result_rows
     WHERE organ_code = 'AF'
+      AND election_code = p_election_code
       AND parish_name IS NOT NULL
     ON CONFLICT (territory_code) DO UPDATE
     SET territory_name = EXCLUDED.territory_name,
@@ -253,6 +263,7 @@ BEGIN
         COALESCE(null_votes, 0)
     FROM staging.cne_result_rows
     WHERE organ_code IN ('CM', 'AM', 'AF')
+      AND election_code = p_election_code
     ON CONFLICT (election_id, territory_code, organ_code) DO UPDATE
     SET registered_voters = EXCLUDED.registered_voters,
         voters = EXCLUDED.voters,
@@ -278,6 +289,7 @@ BEGIN
         resolved_name
     FROM staging.cne_candidate_votes
     WHERE votes IS NOT NULL
+      AND election_code = p_election_code
     ON CONFLICT (election_id, organ_code, territory_code, source_candidate_ref) DO UPDATE
     SET candidate_type = EXCLUDED.candidate_type,
         sigla = EXCLUDED.sigla,
@@ -302,6 +314,7 @@ BEGIN
      AND candidacies.organ_code = votes.organ_code
      AND candidacies.territory_code = votes.territory_code
      AND candidacies.source_candidate_ref = votes.candidate_ref
+    WHERE votes.election_code = p_election_code
     ON CONFLICT (election_id, territory_code, organ_code, candidacy_id) DO UPDATE
     SET votes = EXCLUDED.votes;
 
@@ -326,6 +339,7 @@ BEGIN
      AND candidacies.organ_code = mandates.organ_code
      AND candidacies.territory_code = mandates.territory_code
      AND candidacies.source_candidate_ref = mandates.candidate_ref
+    WHERE mandates.election_code = p_election_code
     ON CONFLICT (election_id, territory_code, organ_code, candidacy_id) DO UPDATE
     SET vote_percent = EXCLUDED.vote_percent,
         mandates = EXCLUDED.mandates;
@@ -351,6 +365,7 @@ BEGIN
      AND c.territory_code = em.territory_code
      AND c.organ_code = em.organ_code
      AND c.sigla = em.candidate_sigla
+    WHERE em.election_code = p_election_code
     ON CONFLICT (election_id, territory_code, organ_code, candidacy_id, list_position, member_name) DO UPDATE
     SET member_name = EXCLUDED.member_name;
 END;

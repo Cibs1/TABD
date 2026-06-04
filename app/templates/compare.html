@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+{% block title %}Historical Comparison{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3 px-4">
+
+  <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+    <h4 class="mb-0">Historical Comparison</h4>
+    <span class="badge bg-secondary">{{ organ_code }}</span>
+
+    <form method="get" action="/compare" class="d-flex gap-2 ms-auto flex-wrap">
+      <select name="from_election" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+        {% for e in elections %}
+        <option value="{{ e.election_code }}" {% if e.election_code == from_election %}selected{% endif %}>
+          From {{ e.election_code }}
+        </option>
+        {% endfor %}
+      </select>
+      <select name="to_election" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+        {% for e in elections %}
+        <option value="{{ e.election_code }}" {% if e.election_code == to_election %}selected{% endif %}>
+          To {{ e.election_code }}
+        </option>
+        {% endfor %}
+      </select>
+      <select name="organ_code" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+        <option value="CM" {% if organ_code == "CM" %}selected{% endif %}>Câmara Municipal</option>
+        <option value="AM" {% if organ_code == "AM" %}selected{% endif %}>Assembleia Municipal</option>
+      </select>
+    </form>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-xl-7">
+      <div class="card h-100">
+        <div class="card-body p-2">
+          {% if family_chart_html %}
+            {{ family_chart_html | safe }}
+          {% else %}
+            <p class="text-muted p-3 mb-0">No historical vote-share data available.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="col-xl-5">
+      <div class="card h-100">
+        <div class="card-body p-2">
+          {% if seat_change_chart_html %}
+            {{ seat_change_chart_html | safe }}
+          {% else %}
+            <p class="text-muted p-3 mb-0">No seat-change data available.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-12">
+      <div class="card h-100">
+        <div class="card-header bg-white fw-semibold">Largest Voter Turnout Changes</div>
+        <div class="card-body p-2">
+          {% if turnout_change_chart_html %}
+            {{ turnout_change_chart_html | safe }}
+          {% else %}
+            <p class="text-muted p-3 mb-0">No turnout-change data available.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+      <table class="table table-sm table-hover mb-0">
+        <thead class="table-light position-sticky top-0">
+          <tr>
+            <th>Municipality</th>
+            <th>{{ from_election }}</th>
+            <th>{{ to_election }}</th>
+            <th class="text-end">Share Δ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in winner_changes %}
+          <tr>
+            <td>
+              <a href="/results?election_code={{ to_election }}&territory_code={{ row.territory_code }}&organ_code={{ organ_code }}">
+                {{ row.territory_name }}
+              </a>
+            </td>
+            <td>
+              <span class="fw-semibold">{{ row.winner_from }}</span>
+              <small class="text-muted">{{ row.share_from }}%</small>
+            </td>
+            <td>
+              <span class="fw-semibold">{{ row.winner_to }}</span>
+              <small class="text-muted">{{ row.share_to }}%</small>
+            </td>
+            <td class="text-end">
+              {% if row.share_to is not none and row.share_from is not none %}
+                {{ "%.2f"|format(row.share_to|float - row.share_from|float) }} pp
+              {% else %}
+                —
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- <div class="col-xl-6">
+      <div class="card h-100">
+        <div class="card-header bg-white fw-semibold">Winner Changes</div>
+        <div class="card-body p-0">
+          {% if winner_changes %}
+          <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>Municipality</th>
+                  <th>{{ from_election }}</th>
+                  <th>{{ to_election }}</th>
+                  <th class="text-end">Share Δ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in winner_changes %}
+                <tr>
+                  <td>
+                    <a href="/results?election_code={{ to_election }}&territory_code={{ row.territory_code }}&organ_code={{ organ_code }}">
+                      {{ row.territory_name }}
+                    </a>
+                  </td>
+                  <td>
+                    <span class="fw-semibold">{{ row.winner_from }}</span>
+                    <small class="text-muted">{{ row.share_from }}%</small>
+                  </td>
+                  <td>
+                    <span class="fw-semibold">{{ row.winner_to }}</span>
+                    <small class="text-muted">{{ row.share_to }}%</small>
+                  </td>
+                  <td class="text-end">
+                    {% if row.share_to is not none and row.share_from is not none %}
+                    {{ "%.2f"|format(row.share_to|float - row.share_from|float) }} %
+                    {% else %}
+                    —
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <p class="text-muted p-3 mb-0">No winner changes for this comparison.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div> -->
+
+  <div class="row g-3 mb-4">
+    <div class="col-xl-6">
+      <div class="card h-100">
+        <div class="card-header bg-white fw-semibold">Seat Change by Political Family</div>
+        <div class="card-body p-0">
+          {% if seat_changes %}
+          <table class="table table-sm table-hover mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>Political Family</th>
+                <th class="text-end">{{ from_election }}</th>
+                <th class="text-end">{{ to_election }}</th>
+                <th class="text-end">Δ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in seat_changes %}
+              <tr>
+                <td class="fw-semibold">{{ row.political_family }}</td>
+                <td class="text-end">{{ row.seats_from }}</td>
+                <td class="text-end">{{ row.seats_to }}</td>
+                <td class="text-end">
+                  {% if row.seat_change > 0 %}
+                    <span class="text-success">+{{ row.seat_change }}</span>
+                  {% elif row.seat_change < 0 %}
+                    <span class="text-danger">{{ row.seat_change }}</span>
+                  {% else %}
+                    0
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% else %}
+          <p class="text-muted p-3 mb-0">No seat changes for this comparison.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-xl-6">
+      <div class="card h-100">
+        <div class="card-header bg-white fw-semibold">Voter Turnout Change Table</div>
+        <div class="card-body p-0">
+          {% if turnout_changes %}
+          <table class="table table-sm table-hover mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>Municipality</th>
+                <th class="text-end">{{ from_election }}</th>
+                <th class="text-end">{{ to_election }}</th>
+                <th class="text-end">Turnout Δ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in turnout_changes[:12] %}
+              <tr>
+                <td>
+                  <a href="/results?election_code={{ to_election }}&territory_code={{ row.territory_code }}&organ_code={{ organ_code }}">
+                    {{ row.territory_name }}
+                  </a>
+                </td>
+                <td class="text-end">{{ row.turnout_from }}%</td>
+                <td class="text-end">{{ row.turnout_to }}%</td>
+                <td class="text-end">
+                  {% if row.turnout_change > 0 %}
+                    <span class="text-success">+{{ row.turnout_change }}%</span>
+                  {% elif row.turnout_change < 0 %}
+                    <span class="text-danger">{{ row.turnout_change }}%</span>
+                  {% else %}
+                    0%
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% else %}
+          <p class="text-muted p-3 mb-0">No turnout changes for this comparison.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

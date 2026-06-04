@@ -56,23 +56,32 @@ Ricardo Ribeiro, up202104806
 \maketitle
 
 \begin{abstract}
-This project implements a database-centred analytics platform for the Portuguese 2021 local elections. The system loads official CNE election spreadsheets into PostgreSQL/PostGIS through a rerunnable ETL pipeline, normalizes the data into an operational schema, populates a dimensional warehouse, and exposes the results through a thin Flask application using explicit SQL through \texttt{psycopg2}. The database includes functions, PL/pgSQL procedures, triggers, materialized views, analytical SQL, D'Hondt mandate allocation, and CAOP administrative geometries for district and municipality-level map visualization.
+This project implements a database-centred analytics platform for Portuguese local elections. The system loads official CNE election spreadsheets for the 2013, 2017, 2021, and 2025 Autarquicas into PostgreSQL/PostGIS through a rerunnable ETL pipeline, normalizes the data into an operational schema, populates a dimensional warehouse, and exposes the results through a thin Flask application using explicit SQL through \texttt{psycopg2}. The database includes functions, PL/pgSQL procedures, triggers, materialized views, analytical SQL, D'Hondt mandate allocation, historical comparison queries and views, and CAOP administrative geometries for district and municipality-level map visualization.
 \end{abstract}
 
 \section{Scope and Data Sources}
 
-The project focuses on the 2021 Portuguese local elections (\emph{Eleições Autárquicas 2021}). This scope was chosen because the assignment recommends it as a baseline and because the CNE provides an official spreadsheet package with detailed results for municipal councils, municipal assemblies, and parish assemblies.
+The project focuses on Portuguese local elections (\emph{Eleições Autárquicas}). The assignment recommends the 2021 election as a baseline, so the first implementation used Autarquicas 2021. The project was then extended with the official CNE packages for Autarquicas 2013, 2017, and 2025 to support historical comparisons across four local election cycles.
 
-The main official election data source is the CNE package \texttt{2021al\_mapa\_oficial}, containing:
+The official election data sources are:
 
 \begin{itemize}
-  \item \texttt{mapa\_1\_resultados.xlsx}: registered voters, voters, blank votes, null votes, and votes per candidacy;
-  \item \texttt{mapa\_anexo.xlsx}: local resolution of labels such as \texttt{[A]}, \texttt{[B]}, and citizen-group candidacies;
-  \item \texttt{mapa\_2\_perc\_mandatos.xlsx}: official vote percentages and mandates;
-  \item \texttt{mapa\_3\_eleitos.xlsx}: elected members by territory, organ, and list.
+  \item \texttt{al2013\_mapaoficial\_retif}: official CNE 2013 results package, converted from legacy \texttt{.xls} to \texttt{.xlsx};
+  \item \texttt{al2017\_mapaoficial\_retif02\_01out2018}: official CNE 2017 results package, converted from legacy \texttt{.xls} to \texttt{.xlsx};
+  \item \texttt{2021al\_mapa\_oficial}: official CNE 2021 results package;
+  \item \texttt{2025al-mapa-oficial\_retificado}: official CNE 2025 results package including the published correction.
 \end{itemize}
 
-For administrative boundaries, the project uses DGT CAOP GeoPackage files. The available files are CAOP 2025 rather than CAOP 2021. This is a limitation, but it is a compatible official DGT administrative-boundary dataset and is explicitly documented. The election facts remain from 2021; the geometries are used for visualization and spatial storage.
+Each package contains the same logical maps:
+
+\begin{itemize}
+  \item \texttt{mapa\_1\_resultados.xlsx} or \texttt{Parte1\_resultados*.xlsx}: registered voters, voters, blank votes, null votes, and votes per candidacy;
+  \item \texttt{mapa\_anexo.xlsx} or \texttt{Parte4\_anexo*.xlsx}: local resolution of labels such as \texttt{[A]}, \texttt{[B]}, and citizen-group candidacies;
+  \item \texttt{mapa\_2\_perc\_mandatos.xlsx} or \texttt{Parte2\_perc\_mandatos*.xlsx}: official vote percentages and mandates;
+  \item \texttt{mapa\_3\_eleitos.xlsx} or \texttt{Parte3\_eleitos*.xlsx}: elected members by territory, organ, and list.
+\end{itemize}
+
+For administrative boundaries, the project uses DGT CAOP GeoPackage files. The available files are CAOP 2025 rather than a separate CAOP file for each election year. This is a limitation, but it is a compatible official DGT administrative-boundary dataset and is explicitly documented. The election facts remain year-specific; the geometries are used for visualization and spatial storage.
 
 \section{Architecture}
 
@@ -86,9 +95,9 @@ The system is organized around the database. Python is used for ETL and as a thi
   \item \texttt{etl}: rerunnable CNE and CAOP loaders.
 \end{itemize}
 
-The loading sequence is: parse CNE Excel files, copy rows into staging, call \texttt{election.load\_from\_staging()}, call \texttt{dw.refresh\_from\_operational()}, and refresh materialized views used by the frontend.
+The loading sequence is: parse CNE Excel files, copy rows into staging, call the parameterized \texttt{election.load\_from\_staging()} procedure for the selected election, call \texttt{dw.refresh\_from\_operational()}, and refresh materialized views used by the frontend.
 
-The repository structure follows the assignment recommendation. SQL files are placed under \texttt{sql/}; Python ETL scripts under \texttt{etl/}; the Flask frontend under \texttt{app/}; processed data checks under \texttt{data/processed/}; and documentation under \texttt{docs/}. The raw CNE spreadsheet package is kept in \texttt{2021al\_mapa\_oficial/}. CAOP GeoPackages are kept in separate CAOP directories and loaded through the spatial ETL script.
+The repository structure follows the assignment recommendation. SQL files are placed under \texttt{sql/}; Python ETL scripts under \texttt{etl/}; the Flask frontend under \texttt{app/}; processed data checks under \texttt{data/processed/}; and documentation under \texttt{docs/}. The raw CNE spreadsheet packages are kept in separate year folders. CAOP GeoPackages are kept in separate CAOP directories and loaded through the spatial ETL script.
 
 \section{Operational Model}
 
@@ -129,13 +138,14 @@ The candidacy model is intentionally local to a territory and organ. This is nec
 
 \section{ETL Pipeline}
 
-The ETL is implemented in \texttt{etl/load\_cne\_2021.py}. It is rerunnable: staging tables are truncated, source data is reloaded, and the operational and warehouse layers are rebuilt from staging. The project also includes a small XLSX reader in \texttt{etl/xlsx\_reader.py} to avoid depending on Excel-specific tooling for parsing the CNE files.
+The CNE ETL is implemented in \texttt{etl/load\_cne\_2021.py}. Despite the historical filename, the loader is now parameterized by source folder, election code, election name, and election date. It is rerunnable: staging tables are truncated for each import, the selected election is deleted and reloaded in the operational schema, and the warehouse/materialized views are refreshed from the full operational schema. The project also includes a small XLSX reader in \texttt{etl/xlsx\_reader.py} to avoid depending on Excel-specific tooling for parsing the CNE files.
 
 The ETL performs several cleaning and reconciliation steps:
 
 \begin{itemize}
   \item normalizes territorial codes to six characters;
   \item converts numeric strings into integers or numeric percentages;
+  \item detects candidate columns dynamically, because the 2013, 2017, 2021, and 2025 files do not have identical party blocks;
   \item resolves local coalition and citizen-group labels using \texttt{mapa\_anexo.xlsx};
   \item stores all candidacies in one structure with a type: party, coalition, or citizen group;
   \item handles region/district code differences for the mainland, Madeira, and the Azores;
@@ -146,17 +156,16 @@ The current parsed counts are shown in Table~\ref{tab:counts}.
 
 \begin{table}[h]
 \centering
-\caption{CNE ETL row counts.}
+\caption{CNE ETL row counts by election.}
 \label{tab:counts}
-\begin{tabular}{lr}
+\begin{tabular}{lrrr}
 \toprule
-Dataset & Rows\\
+Election & Result rows & Vote rows & Elected parsed\\
 \midrule
-Result rows & 3719\\
-Candidate aliases & 2755\\
-Candidate votes & 12277\\
-Percentages and mandates & 12277\\
-Elected members & 35491\\
+AL2013 & 3738 & 12152 & 35579\\
+AL2017 & 3729 & 12069 & 35709\\
+AL2021 & 3719 & 12277 & 35491\\
+AL2025 & 3897 & 12839 & 36521\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -210,7 +219,7 @@ The procedure \texttt{election.load\_from\_staging()} transforms staged CNE rows
 Triggers enforce consistency:
 
 \begin{itemize}
-  \item turnout values cannot be negative, voters cannot exceed registered voters, and blank plus null votes cannot exceed voters;
+  \item turnout values cannot be negative, and blank plus null votes cannot exceed voters;
   \item vote results must match the candidacy scope;
   \item seat results must match the candidacy scope and cannot have negative mandates.
 \end{itemize}
@@ -228,6 +237,8 @@ The file \texttt{sql/05\_analytical\_queries.sql} contains examples required by 
   \item one \texttt{GROUP BY CUBE} query;
   \item advanced aggregation using \texttt{FILTER} and \texttt{jsonb\_agg}.
 \end{itemize}
+
+The extension file \texttt{sql/08\_historical\_comparisons.sql} adds multi-year analytical queries over Autarquicas 2013, 2017, 2021, and 2025. It compares turnout changes by municipality, national vote-share trends by political family, municipalities where the winning list changed, and seat changes across election cycles. The same historical comparison logic is also exposed through the Flask frontend so it can be demonstrated without manually running SQL.
 
 The analytical queries support municipality rankings, national vote shares, turnout rankings inside districts, candidate-type subtotals, and district-level winner summaries.
 
@@ -248,14 +259,14 @@ Level & Total & With geometry\\
 \midrule
 District/region & 20 & 20\\
 Municipality & 308 & 308\\
-Parish & 3083 & 2949\\
+Parish & 3394 & 3241\\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The assignment minimum is satisfied because all district/region and municipality geometries are loaded. Parish coverage is partial because CAOP 2025 does not match every 2021 parish code exactly, but parish geometry was not required for the minimum scope.
+The assignment minimum is satisfied because all district/region and municipality geometries are loaded. Parish coverage is partial because CAOP 2025 does not match every historical parish code exactly, especially when comparing elections before and after parish changes.
 
-The frontend is a Flask application. It uses explicit SQL through \texttt{psycopg2}; no ORM hides the database logic. The homepage shows a Leaflet municipality map colored by the winning candidacy. The municipality result page shows turnout, a results table, vote-share chart, seat-distribution chart, and elected members when available.
+The frontend is a Flask application. It uses explicit SQL through \texttt{psycopg2}; no ORM hides the database logic. The homepage lets the user select the election and organ, then shows a Leaflet municipality map colored by the winning candidacy. The municipality result page shows turnout, a results table, vote-share chart, seat-distribution chart, and elected members when available. The \texttt{/compare} page lets the user compare two loaded local-election years and displays political-family vote-share trends, seat changes, turnout changes, and municipalities where the winning list changed.
 
 The map endpoint returns a GeoJSON feature collection generated from PostGIS using \texttt{ST\_AsGeoJSON}, \texttt{ST\_Transform}, and \texttt{ST\_SimplifyPreserveTopology}. Geometries are stored in the Portuguese projected CRS for database work and transformed to EPSG:4326 for Leaflet display. Each feature includes municipality code, name, district/region name, winning sigla, vote share, mandates, and turnout.
 
@@ -263,38 +274,39 @@ The frontend has deliberately limited responsibilities. It does not compute elec
 
 \section{Validation}
 
-The database was loaded and validated on a local PostgreSQL/PostGIS database named \texttt{tabd}. The main load command was:
+The database was loaded and validated on a local PostgreSQL/PostGIS database named \texttt{tabd}. The first load command creates the schema and loads the baseline election:
 
 \begin{verbatim}
-.venv/bin/python etl/load_cne_2021.py \
-  --setup --dsn "dbname=tabd"
+.venv/bin/python etl/load_cne_2021.py --setup \
+  --dsn "dbname=tabd" \
+  --source-dir 2021al_mapa_oficial \
+  --election-code AL2021 \
+  --election-date 2021-09-26
 \end{verbatim}
 
-The validation file \texttt{sql/07\_validation\_queries.sql} checks staging, operational, warehouse, materialized view, and D'Hondt results.
+The 2013, 2017, and 2025 packages are then loaded with the same script but without \texttt{--setup}. The validation file \texttt{sql/07\_validation\_queries.sql} checks staging, operational, warehouse, materialized view, and D'Hondt results. The historical comparison file \texttt{sql/08\_historical\_comparisons.sql} checks the four loaded elections.
 
 Key validated counts:
 
 \begin{table}[h]
 \centering
-\caption{PostgreSQL validation counts.}
+\caption{PostgreSQL validation counts by election.}
 \begin{tabular}{lr}
 \toprule
-Table & Rows\\
+Election fact & Rows\\
 \midrule
-\texttt{staging.cne\_result\_rows} & 3719\\
-\texttt{staging.cne\_candidate\_votes} & 12277\\
-\texttt{staging.cne\_percent\_mandates} & 12277\\
-\texttt{staging.cne\_elected\_members} & 35491\\
-\texttt{election.vote\_results} & 12277\\
-\texttt{election.seat\_results} & 12277\\
-\texttt{dw.fact\_election\_results} & 12277\\
+\texttt{AL2013 vote\_results} & 12152\\
+\texttt{AL2017 vote\_results} & 12069\\
+\texttt{AL2021 vote\_results} & 12277\\
+\texttt{AL2025 vote\_results} & 12839\\
+\texttt{dw.fact\_election\_results} & 49337\\
 \bottomrule
 \end{tabular}
 \end{table}
 
 For Agueda's municipal council, the D'Hondt calculation matched the official mandates: PPD/PSD.MPT received 4 mandates, PS received 2, and CDS-PP received 1.
 
-The Flask map endpoint was also tested through the Flask test client. The homepage returned HTTP 200, and the GeoJSON endpoint returned 308 municipality features. The first tested feature was Agueda, with winner PPD/PSD.MPT, 9991 votes, 47.26 percent vote share, 4 mandates, and 52.74 percent turnout. This confirms that the frontend can query both election results and loaded CAOP geometries.
+The Flask map endpoint was also tested through the Flask test client. The homepage returned HTTP 200, the detailed result page for Agueda returned HTTP 200, the historical comparison page returned HTTP 200, and the GeoJSON endpoint returned 308 municipality features. This confirms that the frontend can query election results, historical comparison data, and loaded CAOP geometries.
 
 \section{Implementation Files}
 
@@ -309,18 +321,21 @@ The most relevant implementation files are:
   \item \texttt{sql/05\_analytical\_queries.sql}: assignment analytical SQL examples;
   \item \texttt{sql/06\_materialized\_views.sql}: cached frontend/analytics views;
   \item \texttt{sql/07\_validation\_queries.sql}: validation queries;
+  \item \texttt{sql/08\_historical\_comparisons.sql}: historical comparison queries for 2013, 2017, 2021, and 2025;
   \item \texttt{etl/load\_cne\_2021.py}: CNE election ETL;
   \item \texttt{etl/load\_caop.py}: CAOP geometry ETL;
-  \item \texttt{app/app.py} and \texttt{app/db.py}: Flask routes and explicit SQL query helpers.
+  \item \texttt{app/app.py} and \texttt{app/db.py}: Flask routes and explicit SQL query helpers, including historical comparison helpers.
 \end{itemize}
 
 \section{Limitations and Extensions}
 
-The main limitation is the use of CAOP 2025 geometries instead of CAOP 2021. This is acceptable as a documented newer compatible official boundary source, but a perfect historical match would use CAOP 2021. Parish geometries are partial because some parish codes changed between 2021 and 2025.
+The project implements several optional extensions suggested by the assignment: historical comparisons across four election years, support for parish-level result rows, materialized views and precomputed aggregates, and richer frontend interaction including map drill-down and a historical comparison page.
 
-Another limitation concerns elected-member rows: 35491 elected-member rows were parsed, while 35142 were loaded into the operational table. The mismatch comes from parish-level inconsistencies between elected-member labels/codes and normalized candidacies. This does not affect votes, turnout, mandates, D'Hondt, warehouse facts, or municipality-level analysis.
+The main limitation is the use of CAOP 2025 geometries as one common boundary layer for all elections. This is acceptable as a documented newer compatible official boundary source, but a perfect historical comparison would load CAOP boundaries matching each election year. Parish geometries are partial because some parish codes changed across the election cycles.
 
-Future extensions include loading additional election years, adding more historical comparisons, improving parish-level reconciliation, adding materialized aggregates for more frontend views, and enriching the frontend with party filters and district comparison pages.
+Another limitation concerns elected-member rows. Some elected-member records do not match a normalized candidacy and territory exactly, mostly because of parish-level inconsistencies in list labels/codes. This does not affect votes, turnout, mandates, D'Hondt, warehouse facts, or municipality-level analysis. The official AL2013 package also contains one parish-level turnout anomaly, Covelas in Povoa de Lanhoso for \texttt{AF}, where voters exceed registered voters by two; the project preserves the official values and documents the anomaly.
+
+The project does not implement support for multiple election types such as legislative or presidential elections. That extension would require additional organ and territory modelling because local elections use municipal and parish organs, while legislative elections use electoral circles and different seat allocation scopes. Future work could also add party filters, year-specific boundary layers, and election-type-specific frontend views.
 
 \section{Contributions}
 
@@ -338,7 +353,25 @@ The project can be reproduced by installing dependencies, loading the CNE data, 
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python etl/load_cne_2021.py \
-  --setup --dsn "dbname=tabd"
+  --setup --dsn "dbname=tabd" \
+  --source-dir 2021al_mapa_oficial \
+  --election-code AL2021 \
+  --election-date 2021-09-26
+.venv/bin/python etl/load_cne_2021.py \
+  --dsn "dbname=tabd" \
+  --source-dir al2013_mapaoficial_retif \
+  --election-code AL2013 \
+  --election-date 2013-09-29
+.venv/bin/python etl/load_cne_2021.py \
+  --dsn "dbname=tabd" \
+  --source-dir al2017_mapaoficial_retif02_01out2018 \
+  --election-code AL2017 \
+  --election-date 2017-10-01
+.venv/bin/python etl/load_cne_2021.py \
+  --dsn "dbname=tabd" \
+  --source-dir 2025al-mapa-oficial_retificado \
+  --election-code AL2025 \
+  --election-date 2025-10-12
 .venv/bin/python etl/load_caop.py \
   --caop-dir . --dsn "dbname=tabd"
 .venv/bin/flask --app app/app.py run

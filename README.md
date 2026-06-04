@@ -2,7 +2,7 @@
 
 Database-centred project for the Advanced Topics in Databases practical assignment.
 
-The current implementation uses the official CNE Autarquicas 2021 spreadsheet package and builds:
+The current implementation uses official CNE Autarquicas spreadsheet packages for 2013, 2017, 2021, and 2025 and builds:
 
 - a staging schema for raw Excel-derived data;
 - a normalized operational schema;
@@ -10,22 +10,25 @@ The current implementation uses the official CNE Autarquicas 2021 spreadsheet pa
 - PL/pgSQL procedures, functions, triggers, views, and materialized views;
 - analytical SQL examples required by the assignment;
 - a CAOP/PostGIS geometry loader;
-- a thin Flask frontend using explicit SQL through `psycopg2`.
+- a thin Flask frontend using explicit SQL through `psycopg2`, including maps, result drill-down, and historical comparisons.
 
 ## Source Data
 
-The CNE files must be in:
+The CNE files should be in:
 
 ```text
+al2013_mapaoficial_retif/
+al2017_mapaoficial_retif02_01out2018/
 2021al_mapa_oficial/
+2025al-mapa-oficial_retificado/
 ```
 
-The ETL currently uses:
+The ETL uses the logical CNE maps present in each package:
 
-- `mapa_1_resultados.xlsx`: registered voters, voters, blank/null votes, and votes per candidacy.
-- `mapa_anexo.xlsx`: resolution of local `[A]..[G]` coalition and citizen-group labels.
-- `mapa_2_perc_mandatos.xlsx`: official percentages and mandates.
-- `mapa_3_eleitos.xlsx`: elected members per territory, organ, and list.
+- `mapa_1_resultados*.xlsx`, `Parte1_resultados*.xlsx`, or converted legacy equivalent: registered voters, voters, blank/null votes, and votes per candidacy.
+- `mapa_anexo*.xlsx` or `Parte4_anexo*.xlsx`: resolution of local `[A]..[G]` coalition and citizen-group labels.
+- `mapa_2_perc_mandatos*.xlsx`, `Parte2_perc_mandatos*.xlsx`, or converted legacy equivalent: official percentages and mandates.
+- `mapa_3_eleitos*.xlsx`, `Parte3_eleitos*.xlsx`, or converted legacy equivalent: elected members per territory, organ, and list.
 
 For maps, use the DGT CAOP GeoPackages currently placed in:
 
@@ -35,7 +38,7 @@ CAOP_RAM_2025-gpkg/
 CAOP_RAA_2025-gpkg/
 ```
 
-The assignment recommends CAOP 2021 to match the election year. This project uses CAOP 2025 as a newer compatible DGT administrative-boundary dataset; mention this choice in the report.
+The assignment recommends CAOP 2021 to match the baseline election year. This project uses CAOP 2025 as a newer compatible DGT administrative-boundary dataset for all loaded elections; mention this choice in the report.
 
 ## Python Setup
 
@@ -64,7 +67,7 @@ sudo apt-get install -y postgresql-18-postgis-3 postgresql-18-postgis-3-scripts
 sudo systemctl restart postgresql
 ```
 
-## Load CNE Election Data
+## Load Baseline CNE Election Data
 
 Dry-run the parser first:
 
@@ -88,10 +91,75 @@ Export processed CSV files for inspection:
 python3 etl/load_cne_2021.py --dry-run --export-processed data/processed
 ```
 
-Create schemas and load the database:
+Create schemas and load the baseline 2021 database:
 
 ```bash
-python3 etl/load_cne_2021.py --setup
+python3 etl/load_cne_2021.py --setup --dsn "dbname=tabd" \
+  --source-dir 2021al_mapa_oficial \
+  --election-code AL2021 \
+  --election-name "Eleições Autárquicas 2021" \
+  --election-date 2021-09-26
+```
+
+## Load Historical Election Data
+
+The ETL can also load the 2013, 2017, and 2025 official CNE Autarquicas packages as separate elections.
+
+Detected local folders:
+
+```text
+al2013_mapaoficial_retif/
+al2017_mapaoficial_retif02_01out2018/
+2021al_mapa_oficial/
+2025al-mapa-oficial_retificado/
+```
+
+The 2013 and 2017 packages ship as legacy `.xls`/`.ods` files. Convert the `.xls` files once before loading:
+
+```bash
+libreoffice --headless --convert-to xlsx \
+  --outdir al2013_mapaoficial_retif \
+  al2013_mapaoficial_retif/*.xls
+
+libreoffice --headless --convert-to xlsx \
+  --outdir al2017_mapaoficial_retif02_01out2018 \
+  al2017_mapaoficial_retif02_01out2018/*.xls
+```
+
+Then rebuild and load all four elections:
+
+```bash
+.venv/bin/python etl/load_cne_2021.py --setup --dsn "dbname=tabd" \
+  --source-dir 2021al_mapa_oficial \
+  --election-code AL2021 \
+  --election-name "Eleições Autárquicas 2021" \
+  --election-date 2021-09-26
+
+.venv/bin/python etl/load_cne_2021.py --dsn "dbname=tabd" \
+  --source-dir al2013_mapaoficial_retif \
+  --election-code AL2013 \
+  --election-name "Eleições Autárquicas 2013" \
+  --election-date 2013-09-29
+
+.venv/bin/python etl/load_cne_2021.py --dsn "dbname=tabd" \
+  --source-dir al2017_mapaoficial_retif02_01out2018 \
+  --election-code AL2017 \
+  --election-name "Eleições Autárquicas 2017" \
+  --election-date 2017-10-01
+
+.venv/bin/python etl/load_cne_2021.py --dsn "dbname=tabd" \
+  --source-dir 2025al-mapa-oficial_retificado \
+  --election-code AL2025 \
+  --election-name "Eleições Autárquicas 2025" \
+  --election-date 2025-10-12
+
+.venv/bin/python etl/load_caop.py --caop-dir . --dsn "dbname=tabd"
+```
+
+Run historical comparison queries:
+
+```bash
+psql -d tabd -f sql/08_historical_comparisons.sql
 ```
 
 ## Load CAOP Geometries
@@ -113,7 +181,7 @@ Expected loaded geometry coverage:
 ```text
 district        20 / 20
 municipality   308 / 308
-parish        2949 / 3083
+parish        3241 / 3394   # after loading 2013, 2017, 2021, and 2025
 ```
 
 ## Run the Flask App
@@ -128,12 +196,19 @@ Open:
 
 ```text
 http://127.0.0.1:5000
+http://127.0.0.1:5000/compare
 ```
 
 The map will show data only after CAOP geometries are loaded. Before that, the app can still query election results directly by URL, for example:
 
 ```text
 http://127.0.0.1:5000/results?election_code=AL2021&territory_code=010100&organ_code=CM
+```
+
+For `Assembleia de Freguesia`, open a municipality result page and select `Assembleia de Freguesia`; the page lists that municipality's freguesias. Click a freguesia to open its `AF` result page, for example:
+
+```text
+http://127.0.0.1:5000/results?election_code=AL2025&territory_code=010128&organ_code=AF
 ```
 
 ## SQL Files
@@ -146,6 +221,7 @@ http://127.0.0.1:5000/results?election_code=AL2021&territory_code=010100&organ_c
 - `sql/05_analytical_queries.sql`: required analytical query examples.
 - `sql/06_materialized_views.sql`: cached frontend/analytics views.
 - `sql/07_validation_queries.sql`: post-load validation queries.
+- `sql/08_historical_comparisons.sql`: historical comparison queries across 2013, 2017, 2021, and 2025.
 
 ## Validation Queries
 
@@ -201,14 +277,16 @@ ORDER BY mandates DESC, votes DESC;
 ## Current Limitations
 
 - The project uses official DGT CAOP 2025 GeoPackages instead of CAOP 2021. This is documented in the report as a newer compatible boundary dataset.
-- Parish geometry coverage is partial: 2949 / 3083 parish territories have geometry after the CAOP 2025 load. The assignment minimum is still satisfied because district/region and municipality geometries are fully loaded.
-- `staging.cne_elected_members` has 35491 parsed rows, while `election.elected_members` has 35142 loaded rows. The difference comes from parish-level elected-member labels/codes that do not match normalized candidacies exactly. Vote, turnout, mandate, D'Hondt, warehouse, and municipality-level analyses are unaffected.
-- Before submission, add screenshots of the frontend/map to `docs/` if your teacher expects screenshot files separately from the report.
+- Parish geometry coverage is partial: 3241 / 3394 parish territories have geometry after the four-election CAOP load. The assignment minimum is still satisfied because district/region and municipality geometries are fully loaded.
+- Some elected-member rows do not match normalized candidacies exactly. The difference comes from parish-level elected-member labels/codes. Vote, turnout, mandate, D'Hondt, warehouse, and municipality-level analyses are unaffected.
+- The official AL2013 package has one parish-level turnout anomaly: Covelas, Povoa de Lanhoso, AF reports 420 registered voters and 422 voters. The loader preserves the official values and documents this as source-data quality.
+- The project supports multiple local-election years, but not multiple election types such as legislative or presidential elections.
 
 ## Deliverables Status
 
-- `sql/`: DDL, warehouse, functions, views, triggers, analytical queries, validation queries.
+- `sql/`: DDL, warehouse, functions, views, triggers, analytical queries, validation queries, historical comparison queries.
 - `etl/`: CNE and CAOP loaders.
-- `app/`: Flask frontend using `psycopg2`.
-- `docs/report.tex` and `docs/report.pdf`: two-column 5-page report with TikZ diagrams.
-- `slides/presentation.tex`: oral presentation source.
+- `app/`: Flask frontend using `psycopg2`, including map, municipality drill-down, and historical comparison pages.
+- `docs/report.tex` and `docs/report.pdf`: two-column report with TikZ diagrams.
+- `docs/screenshots/`: frontend screenshots.
+- `slides/presentation.tex` and `slides/presentation.pdf`: oral presentation source/PDF.

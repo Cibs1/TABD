@@ -28,7 +28,7 @@
 \begin{frame}{Goal and Scope}
   \begin{itemize}
     \item Database-centred platform for analysing Portuguese election results.
-    \item Dataset: official CNE Autarquicas 2021 spreadsheet package.
+    \item Datasets: official CNE Autarquicas 2013, 2017, 2021, and 2025 spreadsheet packages.
     \item Spatial layer: official DGT CAOP GeoPackages loaded into PostGIS.
     \item Thin Flask frontend using explicit SQL through \texttt{psycopg2}.
   \end{itemize}
@@ -66,6 +66,7 @@
 \begin{frame}{ETL Pipeline}
   \begin{itemize}
     \item Rerunnable Python loader parses the CNE spreadsheets and populates staging.
+    \item Loader is parameterized by source folder, election code, election name, and election date.
     \item PL/pgSQL procedure transforms staging rows into normalized operational tables.
     \item Warehouse refresh rebuilds dimensions and facts from the operational schema.
     \item CAOP loader reads GeoPackages, reprojects to EPSG:3763, and updates territory geometries.
@@ -75,12 +76,12 @@
   \begin{table}
     \begin{tabular}{lr}
       \toprule
-      Dataset & Rows\\
+      Election & Vote rows\\
       \midrule
-      Result rows & 3719\\
-      Candidate votes & 12277\\
-      Percentages and mandates & 12277\\
-      Elected members parsed & 35491\\
+      AL2013 & 12152\\
+      AL2017 & 12069\\
+      AL2021 & 12277\\
+      AL2025 & 12839\\
       \bottomrule
     \end{tabular}
   \end{table}
@@ -97,6 +98,7 @@
         \item \texttt{ROLLUP} and \texttt{CUBE};
         \item \texttt{FILTER} and JSON aggregation.
       \end{itemize}
+    \item Historical SQL compares turnout, vote-share trends, winner changes, and seat changes across 2013/2017/2021/2025.
   \end{itemize}
 \end{frame}
 
@@ -107,7 +109,7 @@
     \item Triggers enforce meaningful business rules:
       \begin{itemize}
         \item no negative turnout/vote/mandate values;
-        \item voters cannot exceed registered voters;
+        \item blank plus null votes cannot exceed voters;
         \item vote and seat rows must match the candidacy scope.
       \end{itemize}
   \end{itemize}
@@ -120,15 +122,16 @@
       \begin{itemize}
         \item district/region: 20 / 20;
         \item municipality: 308 / 308;
-        \item parish: 2949 / 3083.
+        \item parish: 3241 / 3394 after the four-election load.
       \end{itemize}
-    \item Frontend includes election/organ selection, interactive Leaflet municipality map, result table, turnout summary, vote-share chart, and seat chart.
+    \item Frontend includes election/organ selection, interactive Leaflet municipality map, result table, turnout summary, vote-share chart, seat chart, and historical comparison page.
   \end{itemize}
 \end{frame}
 
 \begin{frame}{Validation}
   \begin{itemize}
     \item PostgreSQL validation checks staging, operational, warehouse, materialized views, and D'Hondt results.
+    \item Four loaded elections: AL2013, AL2017, AL2021, and AL2025.
     \item Agueda municipal council D'Hondt matches official mandates:
       \begin{itemize}
         \item PPD/PSD.MPT: 4;
@@ -146,10 +149,11 @@
 
 \begin{frame}{Limitations and Extensions}
   \begin{itemize}
+    \item Implemented extensions: historical comparisons, parish-level support, materialized views/precomputed aggregates, interactive map drill-down, and frontend comparison views.
     \item CAOP 2025 is used instead of CAOP 2021; it is official DGT data but not a perfect historical match.
-    \item Parish geometries are partial because some codes changed between 2021 and 2025.
+    \item Parish geometries are partial because some codes changed across election cycles.
     \item Some elected-member rows do not match normalized parish candidacies exactly.
-    \item Future work: historical comparisons, richer district dashboards, and improved parish reconciliation.
+    \item Future work: multiple election types, election-type-specific frontend views, and improved parish reconciliation.
   \end{itemize}
 \end{frame}
 
@@ -157,6 +161,7 @@
   \begin{enumerate}
     \item Show the repository structure and SQL/ETL files.
     \item Run validation query for Agueda D'Hondt.
+    \item Open the historical comparison page for vote-share trends and winner changes.
     \item Open the Flask map and select a municipality.
     \item Show result table, turnout, vote-share chart, seat chart, and elected members.
   \end{enumerate}
